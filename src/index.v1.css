@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Barlow+Condensed:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand:       #16a34a;
+  --brand-dark:  #166534;
+  --gold:        #f59e0b;
+  --gold-dark:   #d97706;
+  --pitch:       #0a3d22;
+  --pitch-dark:  #030f09;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--brand);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--brand-dark); }
+
+/* ── Text selection ── */
+::selection {
+  background: rgba(22, 163, 74, 0.18);
+  color: #14532d;
+}
+
+/* ── Number input spinner removal ── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; }
+
+/* ── Login background: pitch gradient + subtle grid lines ── */
+/* NOTE: all layers in one background-image to avoid conflict with Tailwind gradient utilities */
+.field-lines {
+  background-color: #010705;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px, transparent 59px,
+      rgba(255,255,255,0.022) 59px, rgba(255,255,255,0.022) 60px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px, transparent 59px,
+      rgba(255,255,255,0.016) 59px, rgba(255,255,255,0.016) 60px
+    ),
+    radial-gradient(ellipse 90% 55% at 50% -5%, rgba(22,163,74,0.14) 0%, transparent 65%),
+    linear-gradient(to bottom right, #010705, #030f09, #052e16);
+}
+
+/* ── Glassmorphism card ── */
+/* Dark semi-transparent base ensures readability even without blur support */
+.glass-card {
+  background: rgba(4, 20, 12, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
