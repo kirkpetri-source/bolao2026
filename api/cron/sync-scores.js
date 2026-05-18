@@ -131,10 +131,6 @@ async function finalizeRound(roundId, roundData, settings) {
   const ranking = Object.values(cartelaPoints)
     .sort((a, b) => b.points - a.points);
 
-  // Detectar jogadores com múltiplas cartelas para exibir o código na mensagem
-  const userCartelaCount = {};
-  ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
-
   const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
   const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
 
@@ -144,14 +140,12 @@ async function finalizeRound(roundId, roundData, settings) {
     const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
     let msg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
     if (winner) {
-      const suffix = userCartelaCount[winner.userId] > 1 ? ` _(${winner.cartelaCode})_` : '';
-      msg += `🥇 *Parabéns ao campeão: ${winner.name}${suffix}!*\n`;
+      msg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
       msg += `🎯 ${winner.points} pontos\n\n`;
     }
     msg += `📊 *Top 5:*\n`;
     ranking.slice(0, 5).forEach((r, i) => {
-      const suffix = userCartelaCount[r.userId] > 1 ? ` (${r.cartelaCode})` : '';
-      msg += `${medals[i] || `${i + 1}.`} ${r.name}${suffix} — ${r.points} pts\n`;
+      msg += `${medals[i] || `${i + 1}.`} ${r.name} (${r.cartelaCode}) — ${r.points} pts\n`;
     });
     msg += `\n🙏 Obrigado a todos que participaram!`;
     if (rankingLink) msg += `\n\n📋 *Ranking completo:*\n${rankingLink}`;

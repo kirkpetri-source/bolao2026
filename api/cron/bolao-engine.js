@@ -321,10 +321,6 @@ export default async function handler(req, res) {
       // Calcular ranking com scoring correto (3pts/1pt, apenas cartelas pagas)
       const ranking = await calcRoundRanking(roundId, round.matches);
 
-      // Detectar jogadores com múltiplas cartelas (para exibir código na mensagem)
-      const userCartelaCount = {};
-      ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
-
       // Buscar próxima rodada (upcoming ou open, número maior)
       const nextRound = allRounds
         .filter(r => (r.status === 'upcoming' || r.status === 'open') && (r.number || 0) > (round.number || 0))
@@ -340,16 +336,14 @@ export default async function handler(req, res) {
       let resultMsg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
 
       if (winner) {
-        const suffix = userCartelaCount[winner.userId] > 1 ? ` _(${winner.cartelaCode})_` : '';
-        resultMsg += `🥇 *Parabéns ao campeão: ${winner.name}${suffix}!*\n`;
+        resultMsg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
         resultMsg += `🎯 ${winner.points} pontos\n\n`;
       }
 
       if (ranking.length > 0) {
         resultMsg += `📊 *Top 5:*\n`;
         ranking.slice(0, 5).forEach((r, i) => {
-          const suffix = userCartelaCount[r.userId] > 1 ? ` (${r.cartelaCode})` : '';
-          resultMsg += `${medals[i] || `${i + 1}.`} ${r.name}${suffix} — ${r.points} pts\n`;
+          resultMsg += `${medals[i] || `${i + 1}.`} ${r.name} (${r.cartelaCode}) — ${r.points} pts\n`;
         });
       }
 

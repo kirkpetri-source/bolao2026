@@ -157,31 +157,25 @@ async function main() {
   console.log(`\n📊 Ranking calculado (${ranking.length} cartelas pagas):`);
   ranking.slice(0, 5).forEach((r, i) => console.log(`  ${i + 1}. ${r.name} (${r.cartelaCode}) — ${r.points} pts`));
 
-  // Detectar multi-cartelas
-  const userCartelaCount = {};
-  ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
-
   // Próxima rodada
   const nextRound = allRounds
     .filter(r => (r.status === 'upcoming' || r.status === 'open') && (r.number || 0) > (round.number || 0))
     .sort((a, b) => (a.number || 0) - (b.number || 0))[0];
 
-  // Link do ranking
-  const rankingLink = appUrl ? `${appUrl}?view=user&tab=ranking&round=${ROUND_ID}` : null;
+  // Link do ranking público
+  const rankingLink = appUrl ? `${appUrl}/ranking/${ROUND_ID}` : null;
 
   // Montar mensagem
   const winner = ranking[0];
   const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
   let resultMsg = `🏆 *BOLÃO BRASILEIRÃO — ${round.name} ENCERRADA!*\n\n`;
   if (winner) {
-    const suffix = userCartelaCount[winner.userId] > 1 ? ` _(${winner.cartelaCode})_` : '';
-    resultMsg += `🥇 *Parabéns ao campeão: ${winner.name}${suffix}!*\n`;
+    resultMsg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
     resultMsg += `🎯 ${winner.points} pontos\n\n`;
   }
   resultMsg += `📊 *Top 5:*\n`;
   ranking.slice(0, 5).forEach((r, i) => {
-    const suffix = userCartelaCount[r.userId] > 1 ? ` (${r.cartelaCode})` : '';
-    resultMsg += `${medals[i] || `${i + 1}.`} ${r.name}${suffix} — ${r.points} pts\n`;
+    resultMsg += `${medals[i] || `${i + 1}.`} ${r.name} (${r.cartelaCode}) — ${r.points} pts\n`;
   });
   resultMsg += `\n🙏 Obrigado a todos que participaram desta rodada!`;
   if (nextRound) {
