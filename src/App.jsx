@@ -1468,6 +1468,8 @@ const AdminPanel = ({ setView }) => {
   // Integrações
   const [wooviAppId, setWooviAppId] = useState(settings?.woovi?.appId || '');
   const [wooviWebhookSecret, setWooviWebhookSecret] = useState(settings?.woovi?.webhookSecret || '');
+  const [showWooviAppId, setShowWooviAppId] = useState(false);
+  const [showWooviSecret, setShowWooviSecret] = useState(false);
   const [footballApiKey, setFootballApiKey] = useState(settings?.footballApi?.key || '');
   const [whatsappGroupJid, setWhatsappGroupJid] = useState(settings?.whatsapp?.groupJid || '');
   const [appUrl, setAppUrl] = useState(settings?.appUrl || (typeof window !== 'undefined' ? window.location.origin : ''));
@@ -4361,9 +4363,7 @@ const AdminPanel = ({ setView }) => {
                   { key: 'integracoes', label: 'Integrações', icon: Key },
                   { key: 'maintenance', label: 'Manutenção', icon: AlertCircle },
                   { key: 'rules', label: 'Regras', icon: FileText },
-                  { key: 'bet', label: 'Aposta', icon: DollarSign },
-                  { key: 'payment', label: 'Pagamento', icon: Key },
-                  { key: 'abtests', label: 'Testes A/B', icon: TrendingUp }
+                  { key: 'bet', label: 'Aposta', icon: DollarSign }
                 ].map(t => (
                   <button key={t.key} onClick={() => setSettingsTab(t.key)} className={`flex-shrink-0 px-3 py-2 rounded-lg border whitespace-nowrap ${settingsTab === t.key ? 'bg-green-50 border-green-300 text-green-700' : 'bg-white border-gray-200 text-gray-700'}`}>
                     <span className="inline-flex items-center gap-1.5 text-sm"><t.icon size={16} />{t.label}</span>
@@ -4597,39 +4597,6 @@ const AdminPanel = ({ setView }) => {
               </div>
             )}
 
-            {/* Payment API */}
-            {settingsTab === 'payment' && (
-              <div className="space-y-6 max-w-3xl">
-                <div className="bg-white rounded-xl shadow-sm border p-6">
-                  <h3 className="text-lg font-bold mb-4">Pagamentos via PIX (Manual)</h3>
-                  <p className="text-sm text-gray-600 mb-4">Fluxo manual: os pagamentos são feitos via PIX e a confirmação é realizada pelo administrador mediante comprovante.</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Chave PIX</label>
-                      <input type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)} className="w-full px-4 py-3 border rounded-lg" placeholder="e-mail, CPF, CNPJ, telefone ou chave aleatória (EVP)" />
-                      {(() => { const v = validatePixKey(pixKey); return (!v.valid) ? (<p className="text-xs text-red-600 mt-1">{v.msg}</p>) : null; })()}
-                      <p className="text-xs text-gray-500 mt-2">Esta chave será exibida aos usuários com instruções de pagamento e solicitação de comprovante.</p>
-                      <label className="block text-sm font-medium mt-4 mb-2">Nome do recebedor (PIX)</label>
-                      <input type="text" value={pixRecipientName} onChange={(e) => setPixRecipientName(e.target.value)} className="w-full px-4 py-3 border rounded-lg" placeholder="Nome do titular da conta PIX" />
-                      <p className="text-xs text-gray-500 mt-2">Este nome é exibido para que o usuário confirme o destinatário correto ao pagar.</p>
-                    </div>
-                    <div className="p-4 border rounded-lg bg-gray-50">
-                      <p className="text-sm font-medium mb-2">Orientações</p>
-                      <ul className="text-sm text-gray-700 list-disc pl-5 space-y-1">
-                        <li>Usuário copia a chave PIX e realiza o pagamento.</li>
-                        <li>Usuário envia o comprovante por WhatsApp para o administrador.</li>
-                        <li>Administrador marca como Pago manualmente na tela de Participantes.</li>
-                      </ul>
-                    </div>
-                  </div>
-                  <div className="flex sm:justify-end gap-3 mt-4">
-                    <button onClick={() => { setPixKey(''); setPixRecipientName(''); }} className="px-6 py-2 border rounded-lg inline-flex items-center gap-2"><RefreshCcw size={16} />Limpar</button>
-                    <button onClick={async () => { const v = validatePixKey(pixKey); if (!v.valid) { alert(v.msg); return; } try { await updateSettings({ payment: { provider: 'pix_manual', pixKey: pixKey.trim(), pixRecipientName: pixRecipientName.trim(), useEnvCredentials: false } }); try { await addDoc(collection(db, 'audit_logs'), { type: 'settings_update', keys: ['payment.pixKey','payment.pixRecipientName','payment.provider'], actorId: currentUser?.id || null, actorName: currentUser?.name || 'Admin', at: serverTimestamp() }); } catch {} alert('Configurações de pagamento atualizadas.'); } catch (e) { alert('Erro ao salvar configurações: ' + (e?.message || 'falha desconhecida')); } }} className="px-6 py-2 bg-green-600 text-white rounded-lg">Salvar</button>
-                  </div>
-                </div>
-
-              </div>
-            )}
 
             {/* Integrações */}
             {settingsTab === 'integracoes' && (
@@ -4640,23 +4607,24 @@ const AdminPanel = ({ setView }) => {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">App ID (Authorization Token)</label>
-                      <input type="text" value={wooviAppId} onChange={e => setWooviAppId(e.target.value)} placeholder="Q2xpZW50X0lk..." className="w-full px-3 py-2 border rounded-lg text-sm font-mono" />
+                      <div className="relative">
+                        <input type={showWooviAppId ? 'text' : 'password'} value={wooviAppId} onChange={e => setWooviAppId(e.target.value)} placeholder="Q2xpZW50X0lk..." className="w-full px-3 py-2 pr-10 border rounded-lg text-sm font-mono" />
+                        <button type="button" onClick={() => setShowWooviAppId(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          {showWooviAppId ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
                       <p className="text-xs text-gray-400 mt-1">Encontre em: Woovi Dashboard → API/Plugins → App ID</p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">Webhook Secret</label>
-                      <input type="password" value={wooviWebhookSecret} onChange={e => setWooviWebhookSecret(e.target.value)} placeholder="Secret do webhook" className="w-full px-3 py-2 border rounded-lg text-sm font-mono" />
+                      <div className="relative">
+                        <input type={showWooviSecret ? 'text' : 'password'} value={wooviWebhookSecret} onChange={e => setWooviWebhookSecret(e.target.value)} placeholder="Secret do webhook" className="w-full px-3 py-2 pr-10 border rounded-lg text-sm font-mono" />
+                        <button type="button" onClick={() => setShowWooviSecret(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          {showWooviSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
                       <p className="text-xs text-gray-400 mt-1">URL do webhook a configurar na Woovi: <span className="font-mono">{window.location.origin}/api/payments/woovi-webhook</span></p>
                     </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl shadow-sm border p-6">
-                  <h3 className="text-lg font-bold mb-1">API de Futebol (API-Football)</h3>
-                  <p className="text-sm text-gray-500 mb-4">Usada como fallback para placares ao vivo em dias de jogo (100 req/dia grátis).</p>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Chave da API</label>
-                    <input type="text" value={footballApiKey} onChange={e => setFootballApiKey(e.target.value)} placeholder="8e8916430267d56e..." className="w-full px-3 py-2 border rounded-lg text-sm font-mono" />
                   </div>
                 </div>
 
@@ -4682,30 +4650,6 @@ const AdminPanel = ({ setView }) => {
             )}
 
             {/* A/B Tests */}
-            {settingsTab === 'abtests' && (
-              <div className="space-y-6 max-w-3xl">
-                <div className="bg-white rounded-xl shadow-sm border p-6">
-                  <h3 className="text-lg font-bold mb-4">Testes A/B</h3>
-                  <div className="flex items-center gap-3 mb-4">
-                    <label className="flex items-center gap-2"><input type="checkbox" checked={abTestsEnabled} onChange={(e) => setAbTestsEnabled(e.target.checked)} /><span>Ativar Testes A/B</span></label>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Novo Dashboard (%)</label>
-                      <input type="number" min="0" max="100" step="1" value={experimentDashboardPercent} onChange={(e) => setExperimentDashboardPercent(e.target.value)} className="w-full px-4 py-3 border rounded-lg" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Fluxo de Pagamento V2 (%)</label>
-                      <input type="number" min="0" max="100" step="1" value={experimentPaymentFlowPercent} onChange={(e) => setExperimentPaymentFlowPercent(e.target.value)} className="w-full px-4 py-3 border rounded-lg" />
-                    </div>
-                  </div>
-                  <div className="flex sm:justify-end gap-3 mt-4">
-                    <button onClick={() => { setAbTestsEnabled(false); setExperimentDashboardPercent(0); setExperimentPaymentFlowPercent(0); }} className="px-6 py-2 border rounded-lg inline-flex items-center gap-2"><RefreshCcw size={16} />Restaurar Padrões</button>
-                    <button onClick={handleSaveWhatsAppMessage} className="px-6 py-2 bg-green-600 text-white rounded-lg">Salvar</button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Histórico de alterações */}
             <div className="mt-8 bg-white rounded-xl shadow-sm border p-6 max-w-3xl">
