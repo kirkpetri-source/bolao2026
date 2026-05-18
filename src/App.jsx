@@ -6090,17 +6090,20 @@ const UserPanel = ({ setView }) => {
     const totalPoints = points ? Object.values(points).reduce((a, b) => a + b, 0) : 0;
 
     return (
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden text-gray-900">
+      <div className="rounded-xl shadow-sm border overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', color: 'var(--txt-1)' }}>
         <button
           onClick={() => toggleRound(round.id)}
-          className="w-full p-6 flex items-center justify-between hover:bg-gray-50 transition text-gray-900"
+          className="w-full p-6 flex items-center justify-between transition"
+          style={{ backgroundColor: 'transparent', color: 'inherit' }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-raised)'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
         >
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl ${status.color}`}>
               {round.number}
             </div>
             <div className="text-left">
-              <h3 className="text-lg font-bold">{round.name}</h3>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--txt-1)' }}>{round.name}</h3>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
                   {status.icon} {status.text}
@@ -6130,7 +6133,7 @@ const UserPanel = ({ setView }) => {
                     <span className="w-28 h-2 bg-gray-200 rounded-full overflow-hidden">
                       <span className="block h-2 bg-green-600" style={{ width: `${progressPercent}%` }} />
                     </span>
-                    <span className="text-xs text-gray-600">{finishedMatchesCount}/{totalMatches}</span>
+                    <span className="text-xs" style={{ color: 'var(--txt-3)' }}>{finishedMatchesCount}/{totalMatches}</span>
                   </span>
                 )}
                 {canPredictNoExisting && (
@@ -6147,13 +6150,13 @@ const UserPanel = ({ setView }) => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">{round.matches?.length || 0} jogos</span>
+            <span className="text-sm" style={{ color: 'var(--txt-3)' }}>{round.matches?.length || 0} jogos</span>
             {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
           </div>
         </button>
 
         {isExpanded && (
-          <div className="border-t bg-gray-50 p-6">
+          <div className="border-t p-6" style={{ backgroundColor: 'var(--bg-raised)' }}>
             {canPredictNoExisting && (
               <div className="text-center py-8">
                 <Target className="mx-auto text-orange-500 mb-3" size={48} />
