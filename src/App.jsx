@@ -1346,8 +1346,8 @@ const PasswordModal = ({ user, onSave, onCancel }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-md w-full">
-        <div className="p-6 border-b flex justify-between items-center">
+      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
           <div className="flex items-center gap-3">
             <Key className="text-green-600" size={24} />
             <h3 className="text-2xl font-bold">Redefinir Senha</h3>
@@ -4046,7 +4046,7 @@ const AdminPanel = ({ setView }) => {
 
               return (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     {/* Arrecadado */}
                     <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-card hover:shadow-card-hover transition-shadow duration-200 group">
                       <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center mb-3">
@@ -4353,18 +4353,18 @@ const AdminPanel = ({ setView }) => {
           <div>
             <h2 className="text-2xl font-bold mb-6">Configurações</h2>
             <div className="bg-white rounded-xl border p-2 mb-6">
-              <div className="flex gap-3 overflow-x-auto">
+              <div className="flex gap-2 overflow-x-auto pb-1">
                 {[
-                  { key: 'whatsapp', label: 'Configurações do WhatsApp', icon: Send },
+                  { key: 'whatsapp', label: 'WhatsApp', icon: Send },
                   { key: 'integracoes', label: 'Integrações', icon: Key },
-                  { key: 'maintenance', label: 'Modo de Manutenção', icon: AlertCircle },
+                  { key: 'maintenance', label: 'Manutenção', icon: AlertCircle },
                   { key: 'rules', label: 'Regras', icon: FileText },
-                  { key: 'bet', label: 'Valor de Aposta', icon: DollarSign },
-                  { key: 'payment', label: 'API de Pagamento', icon: Key },
+                  { key: 'bet', label: 'Aposta', icon: DollarSign },
+                  { key: 'payment', label: 'Pagamento', icon: Key },
                   { key: 'abtests', label: 'Testes A/B', icon: TrendingUp }
                 ].map(t => (
-                  <button key={t.key} onClick={() => setSettingsTab(t.key)} className={`px-3 py-2 rounded-lg border ${settingsTab === t.key ? 'bg-green-50 border-green-300 text-green-700' : 'bg-white border-gray-200 text-gray-700'}`}>
-                    <span className="inline-flex items-center gap-2"><t.icon size={18} />{t.label}</span>
+                  <button key={t.key} onClick={() => setSettingsTab(t.key)} className={`flex-shrink-0 px-3 py-2 rounded-lg border whitespace-nowrap ${settingsTab === t.key ? 'bg-green-50 border-green-300 text-green-700' : 'bg-white border-gray-200 text-gray-700'}`}>
+                    <span className="inline-flex items-center gap-1.5 text-sm"><t.icon size={16} />{t.label}</span>
                   </button>
                 ))}
               </div>
@@ -5767,8 +5767,8 @@ const AdminPanel = ({ setView }) => {
                   Histórico de comunicados
                 </h3>
                 {communications && communications.length > 0 ? (
-                  <div className="overflow-auto max-h-[28rem]">
-                    <table className="w-full text-sm">
+                  <div className="overflow-x-auto overflow-y-auto max-h-[28rem]">
+                    <table className="min-w-[540px] w-full text-sm">
                       <thead>
                         <tr className="bg-gray-50">
                           <th className="px-4 py-2 text-left">Data</th>
@@ -5816,8 +5816,8 @@ const AdminPanel = ({ setView }) => {
 
       {adminPlayerModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={() => setAdminPlayerModal(null)}>
-          <div className="bg-white w-[95%] max-w-3xl rounded-xl shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b">
+          <div className="bg-white w-[95%] max-w-3xl rounded-xl shadow-xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
               <div>
                 <h3 className="text-lg font-bold">Palpites do Participante</h3>
                 <p className="text-sm text-gray-500">{adminPlayerModal.round?.name}</p>
@@ -5826,7 +5826,7 @@ const AdminPanel = ({ setView }) => {
                 <X size={20} />
               </button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <p className="font-medium text-gray-900">{adminPlayerModal.item?.user?.name}</p>
@@ -5846,8 +5846,8 @@ const AdminPanel = ({ setView }) => {
                 </div>
               </div>
 
-              <div className="bg-gray-50 rounded-lg border">
-                <table className="w-full text-xs sm:text-sm">
+              <div className="bg-gray-50 rounded-lg border overflow-x-auto">
+                <table className="min-w-[420px] w-full text-xs sm:text-sm">
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium text-gray-600">Jogo</th>
@@ -6633,8 +6633,8 @@ const UserPanel = ({ setView }) => {
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-lg border">
-              <table className="w-full text-xs sm:text-sm">
+            <div className="bg-gray-50 rounded-lg border overflow-x-auto">
+              <table className="min-w-[420px] w-full text-xs sm:text-sm">
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium text-gray-600">Jogo</th>
@@ -7384,9 +7384,9 @@ const UserPanel = ({ setView }) => {
       {/* ── Tab navigation ── */}
       <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex overflow-x-auto">
+          <div className="flex overflow-x-auto pb-px scrollbar-hide">
             {['predictions', 'ranking', 'finished', 'history'].map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} className={`relative py-3.5 px-4 sm:px-5 text-sm font-semibold whitespace-nowrap border-b-2 flex items-center gap-2 transition-all duration-200 ${
+              <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-shrink-0 relative py-3.5 px-4 sm:px-5 text-sm font-semibold whitespace-nowrap border-b-2 flex items-center gap-2 transition-all duration-200 ${
                 activeTab === tab
                   ? 'border-campo-600 text-campo-700'
                   : 'border-transparent text-noite-400 hover:text-noite-700 hover:border-noite-200'

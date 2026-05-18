@@ -82,6 +82,10 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--campo); border-radius: 9999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--campo-dark); }
 
+/* ─── Utilities ──────────────────────────────────── */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 /* ─── Selection ─────────────────────────────────── */
 ::selection { background: rgba(0,133,66,0.18); color: #004522; }
 .dark ::selection { background: rgba(0,133,66,0.35); color: #EBF2EC; }
