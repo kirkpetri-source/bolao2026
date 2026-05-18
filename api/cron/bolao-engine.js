@@ -321,10 +321,18 @@ export default async function handler(req, res) {
       // Calcular ranking com scoring correto (3pts/1pt, apenas cartelas pagas)
       const ranking = await calcRoundRanking(roundId, round.matches);
 
+      // Detectar jogadores com múltiplas cartelas (para exibir código na mensagem)
+      const userCartelaCount = {};
+      ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
+
       // Buscar próxima rodada (upcoming ou open, número maior)
       const nextRound = allRounds
         .filter(r => (r.status === 'upcoming' || r.status === 'open') && (r.number || 0) > (round.number || 0))
         .sort((a, b) => (a.number || 0) - (b.number || 0))[0];
+
+      // Link para o ranking da app (fallback se PDF falhar)
+      const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
+      const rankingLink = appUrl ? `${appUrl}?view=user&tab=ranking&round=${roundId}` : null;
 
       // Montar mensagem de resultado
       const winner = ranking[0];
@@ -332,14 +340,16 @@ export default async function handler(req, res) {
       let resultMsg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
 
       if (winner) {
-        resultMsg += `🥇 *Parabéns ao campeão: ${winner.name}!*\n`;
+        const suffix = userCartelaCount[winner.userId] > 1 ? ` _(${winner.cartelaCode})_` : '';
+        resultMsg += `🥇 *Parabéns ao campeão: ${winner.name}${suffix}!*\n`;
         resultMsg += `🎯 ${winner.points} pontos\n\n`;
       }
 
       if (ranking.length > 0) {
         resultMsg += `📊 *Top 5:*\n`;
         ranking.slice(0, 5).forEach((r, i) => {
-          resultMsg += `${medals[i] || `${i + 1}.`} ${r.name} — ${r.points} pts\n`;
+          const suffix = userCartelaCount[r.userId] > 1 ? ` (${r.cartelaCode})` : '';
+          resultMsg += `${medals[i] || `${i + 1}.`} ${r.name}${suffix} — ${r.points} pts\n`;
         });
       }
 
@@ -359,19 +369,27 @@ export default async function handler(req, res) {
         resultMsg += `\nFique ligado e faça seus palpites! ⚽`;
       }
 
-      // Gerar e enviar PDF + mensagem ao grupo
+      if (rankingLink) resultMsg += `\n\n📋 *Ranking completo:*\n${rankingLink}`;
+
+      // Gerar e enviar PDF; verificar retorno e logar falha sem bloquear
       const target = GROUP_JID || ADMIN_PHONE;
       if (target) {
         const pdfBase64 = await generateRankingPdf(roundName, ranking);
         if (pdfBase64) {
-          await sendWhatsAppDocument(
+          const pdfOk = await sendWhatsAppDocument(
             target,
             pdfBase64,
             `resultado-${round.number || roundId}.pdf`,
             `📊 Resultado completo — ${roundName}`,
             settings
           );
-          logs.push(`PDF do resultado da ${roundName} enviado ${GROUP_JID ? 'ao grupo' : 'ao admin'}.`);
+          if (pdfOk) {
+            logs.push(`PDF do resultado da ${roundName} enviado ${GROUP_JID ? 'ao grupo' : 'ao admin'}.`);
+          } else {
+            logs.push(`[AVISO] PDF da ${roundName} não foi entregue — link incluído na mensagem como fallback.`);
+          }
+        } else {
+          logs.push(`[AVISO] PDF da ${roundName} não pôde ser gerado — link incluído na mensagem.`);
         }
         await sendWhatsApp(target, resultMsg, settings);
         logs.push(`Mensagem de resultado da ${roundName} enviada.`);

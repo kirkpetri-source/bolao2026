@@ -1470,6 +1470,7 @@ const AdminPanel = ({ setView }) => {
   const [wooviWebhookSecret, setWooviWebhookSecret] = useState(settings?.woovi?.webhookSecret || '');
   const [footballApiKey, setFootballApiKey] = useState(settings?.footballApi?.key || '');
   const [whatsappGroupJid, setWhatsappGroupJid] = useState(settings?.whatsapp?.groupJid || '');
+  const [appUrl, setAppUrl] = useState(settings?.appUrl || (typeof window !== 'undefined' ? window.location.origin : ''));
   const [syncRoundsLoading, setSyncRoundsLoading] = useState(false);
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState(null);
@@ -2424,6 +2425,7 @@ const AdminPanel = ({ setView }) => {
         whatsappMessage: whatsappMessage,
         betValue: parseFloat(betValue),
         chargeMessageTemplate: chargeMessageTemplate,
+        appUrl: (appUrl || '').trim(),
         devolution: {
           link: devolutionLink,
           instanceName: devolutionInstance,
@@ -4658,13 +4660,18 @@ const AdminPanel = ({ setView }) => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="bg-white rounded-xl shadow-sm border p-6 space-y-4">
                   <h3 className="text-lg font-bold mb-1">Grupo WhatsApp (Resultados)</h3>
-                  <p className="text-sm text-gray-500 mb-4">JID do grupo onde o PDF de resultados será enviado automaticamente ao fim de cada rodada.</p>
+                  <p className="text-sm text-gray-500">JID do grupo onde o PDF de resultados será enviado automaticamente ao fim de cada rodada.</p>
                   <div>
                     <label className="block text-sm font-medium mb-1">JID do Grupo</label>
                     <input type="text" value={whatsappGroupJid} onChange={e => setWhatsappGroupJid(e.target.value)} placeholder="120363XXXXXXXXX@g.us" className="w-full px-3 py-2 border rounded-lg text-sm font-mono" />
                     <p className="text-xs text-gray-400 mt-1">Para obter o JID: envie uma mensagem ao grupo via EvolutionAPI e veja o campo "remoteJid" na resposta.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">URL pública da app</label>
+                    <input type="url" value={appUrl} onChange={e => setAppUrl(e.target.value)} placeholder="https://seu-sistema.vercel.app" className="w-full px-3 py-2 border rounded-lg text-sm" />
+                    <p className="text-xs text-gray-400 mt-1">Usada para gerar o link do ranking no WhatsApp quando o PDF não puder ser enviado. Salve para ativar.</p>
                   </div>
                 </div>
 

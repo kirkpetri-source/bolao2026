@@ -98,56 +98,73 @@ async function finalizeRound(roundId, roundData, settings) {
   const userNames = {};
   usersSnap.docs.forEach(d => { userNames[d.id] = d.data().name || 'Participante'; });
 
-  // Calcular pontos de cada palpite e acumular por usuário
-  const userPoints = {};
+  // Agrupar palpites por cartela (userId + cartelaCode) — nunca acumular entre cartelas
+  const cartelaPoints = {};
   for (const predDoc of predsSnap.docs) {
     const pred = predDoc.data();
-    let totalPoints = 0;
+    if (!pred.paid) continue; // só cartelas pagas
+
+    const uid = pred.userId;
+    const code = pred.cartelaCode || 'ANTIGA';
+    const key = `${uid}__${code}`;
+    let predPts = 0;
 
     if (Array.isArray(pred.predictions)) {
       for (const p of pred.predictions) {
         const match = roundData.matches?.find(m => m.id === p.matchId || m.apiEventId === p.apiEventId);
-        if (match?.finished) {
-          totalPoints += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
-        }
+        if (match?.finished) predPts += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
       }
     } else if (pred.matchId !== undefined) {
       const match = roundData.matches?.find(m => m.id === pred.matchId);
-      if (match?.finished) {
-        totalPoints = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
-      }
+      if (match?.finished) predPts = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
     }
 
-    await updateDoc(predDoc.ref, { points: totalPoints });
+    await updateDoc(predDoc.ref, { points: predPts });
 
-    const uid = pred.userId;
-    if (!userPoints[uid]) userPoints[uid] = { name: userNames[uid] || 'Participante', points: 0 };
-    userPoints[uid].points += totalPoints;
+    if (!cartelaPoints[key]) {
+      cartelaPoints[key] = { userId: uid, cartelaCode: code, name: userNames[uid] || 'Participante', points: 0 };
+    }
+    cartelaPoints[key].points += predPts;
   }
 
-  // Montar ranking ordenado
-  const ranking = Object.entries(userPoints)
-    .map(([uid, data]) => ({ userId: uid, name: data.name, points: data.points }))
+  // Ranking: uma entrada por cartela — mesmo jogador aparece N vezes se tiver N cartelas
+  const ranking = Object.values(cartelaPoints)
     .sort((a, b) => b.points - a.points);
 
-  // ─── Enviar resultado ANTES de marcar como finished ───────────────────────
-  // Se o envio falhar, a rodada permanece 'closed' e o cron tenta novamente.
-  // Só gravamos 'finished' após confirmação de envio bem-sucedido.
-  if (groupJid) {
-    const pdfBase64 = await generateRankingPdf(roundName, ranking);
-    const winner = ranking[0];
-    const winnerMsg = winner
-      ? `🏆 *${roundName} — RESULTADO FINAL!*\n\nO campeão desta rodada é *${winner.name}* com *${winner.points} pontos*! Parabéns! 🎉\n\nResultado completo no PDF anexo.`
-      : `📊 *${roundName} — RESULTADO FINAL!*\nVeja o ranking completo em anexo.`;
+  // Detectar jogadores com múltiplas cartelas para exibir o código na mensagem
+  const userCartelaCount = {};
+  ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
 
-    if (pdfBase64) {
-      await sendWhatsAppDocument(groupJid, pdfBase64, `resultado-${roundData.number}.pdf`, winnerMsg, settings);
+  const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
+  const rankingLink = appUrl ? `${appUrl}?view=user&tab=ranking&round=${roundId}` : null;
+
+  const target = groupJid || adminPhone;
+  if (target) {
+    const winner = ranking[0];
+    const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    let msg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
+    if (winner) {
+      const suffix = userCartelaCount[winner.userId] > 1 ? ` _(${winner.cartelaCode})_` : '';
+      msg += `🥇 *Parabéns ao campeão: ${winner.name}${suffix}!*\n`;
+      msg += `🎯 ${winner.points} pontos\n\n`;
     }
-    await sendWhatsApp(groupJid, winnerMsg, settings);
-  } else if (adminPhone) {
-    const lines = ranking.slice(0, 10).map((e, i) => `${i + 1}. ${e.name}: ${e.points} pts`).join('\n');
-    const msg = `🏆 *${roundName} — Resultado Final*\n\n${lines}`;
-    await sendWhatsApp(adminPhone, msg, settings);
+    msg += `📊 *Top 5:*\n`;
+    ranking.slice(0, 5).forEach((r, i) => {
+      const suffix = userCartelaCount[r.userId] > 1 ? ` (${r.cartelaCode})` : '';
+      msg += `${medals[i] || `${i + 1}.`} ${r.name}${suffix} — ${r.points} pts\n`;
+    });
+    msg += `\n🙏 Obrigado a todos que participaram!`;
+    if (rankingLink) msg += `\n\n📋 *Ranking completo:*\n${rankingLink}`;
+
+    // Tentar enviar PDF; logar falha mas não bloquear
+    if (groupJid) {
+      const pdfBase64 = await generateRankingPdf(roundName, ranking);
+      if (pdfBase64) {
+        const pdfOk = await sendWhatsAppDocument(groupJid, pdfBase64, `resultado-${roundData.number}.pdf`, `📊 Resultado — ${roundName}`, settings);
+        if (!pdfOk) console.warn(`[sync-scores] PDF não enviado para o grupo (${roundName}). Link na mensagem como fallback.`);
+      }
+    }
+    await sendWhatsApp(target, msg, settings);
   }
 
   // Marcar rodada como finalizada apenas após o envio ter sido concluído
