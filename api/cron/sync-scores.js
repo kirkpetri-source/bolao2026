@@ -136,7 +136,7 @@ async function finalizeRound(roundId, roundData, settings) {
   ranking.forEach(r => { userCartelaCount[r.userId] = (userCartelaCount[r.userId] || 0) + 1; });
 
   const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
-  const rankingLink = appUrl ? `${appUrl}?view=user&tab=ranking&round=${roundId}` : null;
+  const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
 
   const target = groupJid || adminPhone;
   if (target) {

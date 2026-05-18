@@ -8,6 +8,9 @@
     { "path": "/api/cron/bolao-engine", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/sync-scores",  "schedule": "*/5 * * * *" }
   ],
+  "rewrites": [
+    { "source": "/ranking/:roundId", "destination": "/index.html" }
+  ],
   "redirects": [
     {
       "source": "/(.*)",

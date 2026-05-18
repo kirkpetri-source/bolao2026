@@ -332,7 +332,7 @@ export default async function handler(req, res) {
 
       // Link para o ranking da app (fallback se PDF falhar)
       const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
-      const rankingLink = appUrl ? `${appUrl}?view=user&tab=ranking&round=${roundId}` : null;
+      const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
 
       // Montar mensagem de resultado
       const winner = ranking[0];
