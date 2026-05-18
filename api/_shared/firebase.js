@@ -84,7 +84,7 @@ export async function sendWhatsAppDocument(number, base64Pdf, fileName, caption,
       mediatype: 'document',
       mimetype: 'application/pdf',
       caption: caption || '',
-      media: `data:application/pdf;base64,${base64Pdf}`,
+      media: base64Pdf,
       fileName: fileName || 'resultado.pdf'
     }, {
       headers: { 'Content-Type': 'application/json', apikey: token },
