@@ -3681,15 +3681,15 @@ const AdminPanel = ({ setView }) => {
   const changeStatus = async (id, newStatus) => {
     const round = rounds.find(r => r.id === id);
     if (round) {
-      await updateRound(id, { ...round, status: newStatus });
-      
+      // Ao retornar para 'closed', resetar flags de finalização para o cron reprocessar
+      const extraFields = newStatus === 'closed'
+        ? { resultadoCalculado: false, resultSentToGroup: false }
+        : {};
+      await updateRound(id, { ...round, status: newStatus, ...extraFields });
+
       if (newStatus === 'finished') {
-        setTimeout(() => {
-          generateRoundPDF(id);
-        }, 500);
-        setTimeout(() => {
-          generateFinalizedRoundReportPDF(id);
-        }, 1200);
+        setTimeout(() => { generateRoundPDF(id); }, 500);
+        setTimeout(() => { generateFinalizedRoundReportPDF(id); }, 1200);
         setTimeout(async () => {
           try {
             const msg = buildResultGroupMessage(id);
