@@ -4,13 +4,13 @@ import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
 } from 'firebase/firestore';
 
-// Calcula pontos de um palpite com base no resultado real
+// Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
 function calcPoints(predHome, predAway, realHome, realAway) {
-  if (realHome === null || realAway === null) return 0;
-  if (predHome === realHome && predAway === realAway) return 10; // Acerto exato
+  if (realHome == null || realAway == null) return 0;
+  if (predHome === realHome && predAway === realAway) return 3;
   const predResult = predHome > predAway ? 'H' : predHome < predAway ? 'A' : 'D';
   const realResult = realHome > realAway ? 'H' : realHome < realAway ? 'A' : 'D';
-  return predResult === realResult ? 3 : 0; // Acerto de tendência
+  return predResult === realResult ? 1 : 0;
 }
 
 async function generateRankingPdf(roundName, ranking) {
@@ -181,11 +181,19 @@ export default async function handler(req, res) {
     const settings = await getSettings();
     const apiFootballKey = settings?.footballApi?.key || process.env.APIFOOTBALL_KEY;
 
-    // Buscar rodadas fechadas com jogos não finalizados
+    // Buscar rodadas fechadas que ainda precisam de processamento:
+    // - tem jogos não finalizados (API pode atualizar placares), OU
+    // - todos os jogos já estão finalizados mas resultadoCalculado ainda não foi gravado
+    //   (cobre o caso em que bolao-engine marcou matches via Step 4 mas sync-scores não rodou ainda)
     const roundsSnap = await getDocs(collection(db, 'rounds'));
     const activeRounds = roundsSnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .filter(r => r.status === 'closed' && r.matches?.some(m => !m.finished));
+      .filter(r => {
+        if (r.status !== 'closed') return false;
+        if (r.resultadoCalculado) return false;
+        // Incluir se: tem jogos pendentes OU todos já finalizados (para não perder o disparo)
+        return r.matches?.length > 0;
+      });
 
     if (!activeRounds.length) {
       return res.status(200).json({ success: true, dryRun, logs: ['Nenhuma rodada ativa com jogos pendentes.'] });
