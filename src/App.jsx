@@ -5907,19 +5907,7 @@ const UserPanel = ({ setView }) => {
   const finishedRounds = rounds.filter(r => r.status === 'finished').sort((a, b) => b.number - a.number);
   const rankableRounds = rounds
     .filter(r => r.status === 'finished' || r.status === 'closed')
-    .sort((a, b) => {
-      const toTs = (r) => {
-        if (r?.closeAt) {
-          const t = new Date(r.closeAt).getTime();
-          if (!isNaN(t)) return t;
-        }
-        const ca = r?.createdAt;
-        if (ca && typeof ca.toDate === 'function') return ca.toDate().getTime();
-        if (ca && typeof ca === 'object' && typeof ca.seconds === 'number') return ca.seconds * 1000;
-        return typeof r?.number === 'number' ? r.number : 0;
-      };
-      return toTs(b) - toTs(a);
-    });
+    .sort((a, b) => (b.number || 0) - (a.number || 0));
   const upcomingRounds = rounds.filter(r => r.status === 'upcoming').sort((a, b) => a.number - b.number);
   const openRoundsForBetting = rounds
     .filter(r => r.status === 'open' && !isRoundTimedClosed(r))
