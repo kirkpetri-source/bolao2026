@@ -6090,10 +6090,10 @@ const UserPanel = ({ setView }) => {
     const totalPoints = points ? Object.values(points).reduce((a, b) => a + b, 0) : 0;
 
     return (
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden text-gray-900">
         <button
           onClick={() => toggleRound(round.id)}
-          className="w-full p-6 flex items-center justify-between hover:bg-gray-50 transition"
+          className="w-full p-6 flex items-center justify-between hover:bg-gray-50 transition text-gray-900"
         >
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl ${status.color}`}>
@@ -7243,15 +7243,11 @@ const UserPanel = ({ setView }) => {
   const finishedRoundsAll = useMemo(() => {
     return rounds
       .filter(r => r.status === 'finished')
-      .sort((a, b) => roundToTimestamp(b) - roundToTimestamp(a));
+      .sort((a, b) => (b.number || 0) - (a.number || 0));
   }, [rounds]);
 
-  // Nesta aba não mostramos a mais recente: base exclui a primeira (mais recente)
-  const finishedRoundsBase = useMemo(() => {
-    if (finishedRoundsAll.length === 0) return finishedRoundsAll;
-    const latestId = finishedRoundsAll[0].id;
-    return finishedRoundsAll.filter(r => r.id !== latestId);
-  }, [finishedRoundsAll]);
+  // Todas as rodadas finalizadas disponíveis para seleção
+  const finishedRoundsBase = finishedRoundsAll;
 
   // Aplicar filtros por data/período
   const filteredFinishedRounds = useMemo(() => {
