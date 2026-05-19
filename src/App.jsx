@@ -6655,6 +6655,7 @@ const UserPanel = ({ setView }) => {
     const [timeLeftMs, setTimeLeftMs] = useState(0);
     const [retryCount, setRetryCount] = useState(0);
     const [approvedAt, setApprovedAt] = useState(null);
+    const [qrDataUrl, setQrDataUrl] = useState(null);
     const [payer, setPayer] = useState({
       name: currentUser?.name || '',
       email: currentUser?.email || '',
@@ -6722,6 +6723,16 @@ const UserPanel = ({ setView }) => {
       const id = setInterval(update, 1000);
       return () => clearInterval(id);
     }, [tx?.expiration]);
+
+    useEffect(() => {
+      if (!tx?.brCode) { setQrDataUrl(null); return; }
+      import('qrcode').then(mod => {
+        const QRCode = mod.default;
+        QRCode.toDataURL(tx.brCode, { width: 192, margin: 2 })
+          .then(url => setQrDataUrl(url))
+          .catch(() => setQrDataUrl(null));
+      }).catch(() => setQrDataUrl(null));
+    }, [tx?.brCode]);
 
     const formatLeft = () => {
       const s = Math.floor(timeLeftMs / 1000);
@@ -6896,8 +6907,8 @@ const UserPanel = ({ setView }) => {
               {/* Modo Woovi: QR Code PIX */}
               {tx.mode === 'woovi' && (
                 <div className="flex flex-col items-center gap-3">
-                  {tx.qrCodeImage && (
-                    <img src={tx.qrCodeImage} alt="QR Code PIX" className="w-48 h-48 border rounded-lg" />
+                  {(qrDataUrl || tx.qrCodeImage) && (
+                    <img src={qrDataUrl || tx.qrCodeImage} alt="QR Code PIX" className="w-48 h-48 border rounded-lg" />
                   )}
                   <p className="text-sm text-gray-600 text-center">Escaneie o QR Code ou copie o código PIX abaixo</p>
                   {tx.brCode && (
