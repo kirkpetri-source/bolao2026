@@ -1,5 +1,5 @@
 import { db, getSettings, sendWhatsApp, sendWhatsAppDocument } from '../_shared/firebase.js';
-import { getRoundFixtures, getLiveScores } from '../services/footballApi.js';
+import { getRoundFixtures, getLiveScores, IN_PROGRESS_STATUSES } from '../services/footballApi.js';
 import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
 } from 'firebase/firestore';
@@ -243,12 +243,26 @@ export default async function handler(req, res) {
         const homeScore = source.homeScore !== undefined ? source.homeScore : match.homeScore;
         const awayScore = source.awayScore !== undefined ? source.awayScore : match.awayScore;
         const finished = source.finished ?? match.finished;
+        // Propaga matchStatus para que bolao-engine possa detectar jogos ainda em andamento
+        // (ex: 'ET' = prorrogação, 'P' = pênaltis, 'BT' = intervalo prorrogação)
+        const matchStatus = source.matchStatus ?? match.matchStatus ?? null;
 
-        if (homeScore !== match.homeScore || awayScore !== match.awayScore || finished !== match.finished) {
+        if (
+          homeScore !== match.homeScore ||
+          awayScore !== match.awayScore ||
+          finished !== match.finished ||
+          matchStatus !== (match.matchStatus ?? null)
+        ) {
           scoresChanged = true;
         }
 
-        return { ...match, homeScore, awayScore, finished };
+        return {
+          ...match,
+          homeScore,
+          awayScore,
+          finished,
+          ...(matchStatus !== null ? { matchStatus } : {})
+        };
       });
 
       if (dryRun) {
@@ -258,6 +272,8 @@ export default async function handler(req, res) {
           away: m.awayTeamName,
           score: m.homeScore !== null ? `${m.homeScore}x${m.awayScore}` : 'pendente',
           finished: m.finished,
+          matchStatus: m.matchStatus ?? null,
+          inProgress: m.matchStatus ? IN_PROGRESS_STATUSES.has(m.matchStatus) : false,
           source: liveMap[m.apiEventId] ? 'api-football-live' : apiMap[m.apiEventId] ? 'thesportsdb' : 'sem-fonte'
         }));
         logs.push(`[DRY RUN] Rodada ${roundNum}: placares ${scoresChanged ? 'teriam sido atualizados' : 'sem alteração'}`);

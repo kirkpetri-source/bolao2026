@@ -65,13 +65,17 @@ const sortMatchesByDate = (a, b) => {
   return new Date(a.date) - new Date(b.date);
 };
 
-// Retorna true se o jogo está efetivamente encerrado: flag manual OU placar disponível
-// e horário do jogo passou há mais de 115 minutos (90 min regulares + margem de acréscimos).
-const MATCH_FINISH_AFTER_MS = 115 * 60 * 1000;
+// Retorna true se o jogo está efetivamente encerrado: flag manual OU status terminal da API
+// OU fallback por tempo (170 min cobre 90 reg + prorrogação completa + pênaltis + margem).
+const MATCH_FINISH_AFTER_MS = 170 * 60 * 1000;
+// Status em andamento (API-Football short codes) — sincronizado com bolao-engine e footballApi.js
+const MATCH_IN_PROGRESS_STATUSES = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT', 'LIVE']);
 const isMatchEffectivelyFinished = (match) => {
   if (match?.finished) return true;
   if (match?.homeScore == null || match?.awayScore == null) return false;
   if (!match?.date) return false;
+  // Se a API sinalizou que o jogo ainda está em andamento, não mostrar como finalizado
+  if (match?.matchStatus && MATCH_IN_PROGRESS_STATUSES.has(match.matchStatus)) return false;
   return Date.now() - new Date(match.date).getTime() >= MATCH_FINISH_AFTER_MS;
 };
 

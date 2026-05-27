@@ -72,6 +72,14 @@ export async function getAllTeams() {
   return Object.values(teamsMap);
 }
 
+// Status terminais oficiais da API-Football — jogo encerrado definitivamente
+const TERMINAL_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO']);
+
+// Status em andamento — jogo NÃO pode ser marcado como finalizado
+const IN_PROGRESS_STATUSES = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT', 'LIVE']);
+
+export { TERMINAL_STATUSES, IN_PROGRESS_STATUSES };
+
 export async function getLiveScores(apiFootballKey) {
   const key = apiFootballKey || process.env.APIFOOTBALL_KEY;
   if (!key) return [];
@@ -86,7 +94,10 @@ export async function getLiveScores(apiFootballKey) {
       homeScore: f.goals.home,
       awayScore: f.goals.away,
       elapsed: f.fixture.status.elapsed,
-      finished: f.fixture.status.short === 'FT',
+      // matchStatus carrega o código curto (ex: 'FT', 'AET', 'ET', 'P') para uso downstream
+      matchStatus: f.fixture.status.short,
+      // finished=true apenas para status terminais definitivos (FT, AET, PEN, AWD, WO)
+      finished: TERMINAL_STATUSES.has(f.fixture.status.short),
       status: f.fixture.status.long
     }));
   } catch {

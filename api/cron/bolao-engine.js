@@ -2,16 +2,27 @@ import { db, getSettings, sendWhatsApp, sendWhatsAppDocument, formatPhone } from
 import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from 'firebase/firestore';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
-// Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente
-const FINISH_AFTER_MS = 115 * 60 * 1000; // 90 min + 25 min de acréscimos/intervalo
+// Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente.
+// Cobre o pior caso: 90 min regulares + 7 acréscimos + 5 intervalo prorrogação
+// + 30 min prorrogação + 5 acréscimos ET + 15 min pênaltis + 18 min margem de segurança.
+// Este fallback só é usado quando a API não retorna status (ex: API indisponível).
+const FINISH_AFTER_MS = 170 * 60 * 1000; // 170 min (~2h50) — fallback seguro para pênaltis
+
+// Status em andamento (API-Football short codes) — jogo NÃO pode ser marcado como finalizado.
+// Sincronizado com api/services/footballApi.js.
+const IN_PROGRESS_STATUSES = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT', 'LIVE']);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-// Verifica se um jogo está efetivamente encerrado (flag manual OU tempo + placar)
+// Verifica se um jogo está efetivamente encerrado (flag manual OU status terminal da API OU fallback por tempo).
 function isEffectivelyFinished(match) {
+  // Flag manual do admin sempre prevalece
   if (match.finished) return true;
   if (match.homeScore == null || match.awayScore == null) return false;
   if (!match.date) return false;
+  // Se a API informou um status em andamento (prorrogação, pênaltis, etc.), aguardar
+  if (match.matchStatus && IN_PROGRESS_STATUSES.has(match.matchStatus)) return false;
+  // Fallback por tempo: só aplica quando API não forneceu status ou está indisponível
   return Date.now() - new Date(match.date).getTime() >= FINISH_AFTER_MS;
 }
 
@@ -281,6 +292,9 @@ export default async function handler(req, res) {
         if (match.finished) return match;
         if (match.homeScore == null || match.awayScore == null) return match;
         if (!match.date) return match;
+        // Se a API sinalizou que o jogo está em andamento (prorrogação, pênaltis, etc.),
+        // NÃO finalizar — aguardar sync-scores atualizar com status terminal
+        if (match.matchStatus && IN_PROGRESS_STATUSES.has(match.matchStatus)) return match;
         if (Date.now() - new Date(match.date).getTime() >= FINISH_AFTER_MS) {
           changed = true;
           return { ...match, finished: true };
