@@ -9,8 +9,12 @@ function normWpp(s) {
   return d.length > 11 ? d.slice(-11) : d;
 }
 function tempPassword() {
-  // 8 caracteres legíveis (hex).
-  return crypto.randomBytes(4).toString('hex');
+  // 8 caracteres de um alfabeto sem ambiguidade (sem 0/O, 1/I/l).
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(8);
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -30,7 +34,7 @@ export default async function handler(req, res) {
     const settings = await getSettings();
     const num = formatPhone(userDoc.data().whatsapp || phone);
     const name = userDoc.data().name || '';
-    const msg = `*Bolão Brasileirão — Redefinição de senha*\n\nOlá${name ? `, ${name}` : ''}! Sua nova senha temporária é: *${temp}*\n\nEntre com ela e troque a senha em seguida, nas configurações.`;
+    const msg = `*Bolão Brasileirão — Redefinição de senha*\n\nOlá${name ? `, ${name}` : ''}! Sua nova senha temporária é:\n\n${temp}\n\nDigite exatamente como acima (diferencia maiúsculas). Entre com ela e troque a senha em seguida.`;
     const sent = await sendWhatsApp(num, msg, settings);
 
     return res.status(200).json({ ok: true, sent });
