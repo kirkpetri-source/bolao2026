@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react';
 import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import bcrypt from 'bcryptjs';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
+import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, adminCreateUser } from './authService.js';
 
 // 🔒 DEV PROJECT — banco de dados isolado, NÃO afeta produção
 const firebaseConfig = {
@@ -19,6 +20,40 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+
+// ─── Separação settings (segredos) x public_config (dados públicos) ───────────
+// O admin lê /settings completo (com tokens Woovi/Evolution). O usuário comum lê
+// apenas /public_config/main, que espelha os campos públicos SEM segredos.
+const PUBLIC_CONFIG_ID = 'main';
+function pickPublicConfig(s) {
+  if (!s) return {};
+  return {
+    betValue: s.betValue ?? 15,
+    brandName: s.brandName ?? '',
+    maintenanceMode: !!s.maintenanceMode,
+    maintenanceMessage: s.maintenanceMessage ?? '',
+    maintenanceUntil: s.maintenanceUntil ?? null,
+    maintenanceAllowedIps: s.maintenanceAllowedIps ?? [],
+    rulesText: s.rulesText ?? '',
+    scoringCriteria: s.scoringCriteria ?? '',
+    tiebreakRules: s.tiebreakRules ?? '',
+    termsOfUse: s.termsOfUse ?? '',
+    systemPolicies: s.systemPolicies ?? '',
+    limitsRestrictions: s.limitsRestrictions ?? '',
+    appUrl: s.appUrl ?? '',
+    // Booleano em vez do appId secreto: o cliente só precisa saber se o Woovi está ativo.
+    wooviEnabled: !!(s.woovi?.appId && String(s.woovi.appId).trim()),
+    payment: {
+      pixKey: s.payment?.pixKey ?? s.pixKey ?? '',
+      pixRecipientName: s.payment?.pixRecipientName ?? s.pixRecipientName ?? '',
+      methods: s.payment?.methods ?? { pix: true, card: false },
+    },
+    whatsapp: {
+      number: s.whatsapp?.number ?? '',
+      groupJid: s.whatsapp?.groupJid ?? '',
+    },
+  };
+}
 
 const generateCartelaCode = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
@@ -252,62 +287,12 @@ const AppProvider = ({ children }) => {
   }, [darkMode]);
   const toggleDark = () => setDarkMode(d => !d);
 
-  // Sessão persistente com timeout de 10 min e renovação automática
-  const SESSION_KEY = 'bb2026.session';
+  // Sessão via Firebase Auth (persistência nativa). Mantemos apenas um timeout
+  // de inatividade de 10 min por cima do Auth.
   const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
-  const SESSION_SECRET = import.meta.env?.VITE_SESSION_SECRET || 'bb-2026-local-secret';
 
-  const textEncoder = new TextEncoder();
-  const toHex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  const sha256 = async (str) => toHex(await crypto.subtle.digest('SHA-256', textEncoder.encode(str)));
-
-  const readSession = () => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const writeSession = async (user) => {
-    const now = Date.now();
-    const session = {
-      userId: user.id,
-      isAdmin: !!user.isAdmin,
-      issuedAt: now,
-      lastActiveAt: now,
-      expiresAt: now + SESSION_TIMEOUT_MS,
-    };
-    session.sig = await sha256(`${session.userId}|${session.issuedAt}|${SESSION_SECRET}`);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    return session;
-  };
-
-  const clearSession = () => {
-    try { localStorage.removeItem(SESSION_KEY); } catch {}
-  };
-
-  const isSessionValid = async (s) => {
-    if (!s) return false;
-    if (s.expiresAt && Date.now() > s.expiresAt) return false;
-    const expected = await sha256(`${s.userId}|${s.issuedAt}|${SESSION_SECRET}`);
-    return s.sig === expected;
-  };
-
-  const touchSession = () => {
-    const s = readSession();
-    if (!s) return;
-    const now = Date.now();
-    s.lastActiveAt = now;
-    s.expiresAt = now + SESSION_TIMEOUT_MS;
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch {}
-  };
-
-  const login = async (user) => {
-    setCurrentUser(user);
-    await writeSession(user);
-  };
+  // Compat: define o usuário atual imediatamente (o observer de Auth confirma depois).
+  const login = (user) => { setCurrentUser(user); };
 
   const requireAdmin = () => {
     if (!currentUser?.isAdmin) {
@@ -315,78 +300,101 @@ const AppProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try { await fbLogout(); } catch (e) { console.error('logout:', e); }
     setCurrentUser(null);
-    clearSession();
   };
 
+  // Dados públicos (não exigem login): libera a tela e carrega estabelecimentos
+  // (usados no formulário de cadastro, antes do login).
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        await initializeDatabase();
-        const [u, t, r, p, s, e, c] = await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'teams')),
-          getDocs(collection(db, 'rounds')),
-          getDocs(collection(db, 'predictions')),
-          getDocs(collection(db, 'settings')),
-          getDocs(collection(db, 'establishments')),
-          getDocs(collection(db, 'communications'))
-        ]);
-        setUsers(u.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; }));
-        setTeams(t.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)));
-        setRounds(r.docs.map(d => ({ id: d.id, ...d.data() })));
-        setPredictions(p.docs.map(d => ({ id: d.id, ...d.data() })));
-        setEstablishments(e.docs.map(d => ({ id: d.id, ...d.data() })));
-        setSettings(s.docs.length > 0 ? { id: s.docs[0].id, ...s.docs[0].data() } : null);
-        setCommunications(c.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (error) {
-        console.error('Load error:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
+    setLoading(false);
+    const unsub = onSnapshot(collection(db, 'establishments'),
+      s => setEstablishments(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => console.error('establishments:', err));
+    return () => unsub();
   }, []);
 
+  // Dados protegidos: só após autenticação. Re-assina ao trocar de usuário e
+  // limpa ao deslogar. Coleções de admin só são assinadas por admin.
   useEffect(() => {
+    if (!currentUser) {
+      setUsers([]); setTeams([]); setRounds([]); setPredictions([]);
+      setCommunications([]); setTeamImportRequests([]);
+      return;
+    }
+    const isAdminUser = !!currentUser.isAdmin;
+    if (isAdminUser) { initializeDatabase().catch(err => console.error('initDb:', err)); }
+
     const uns = [
-      onSnapshot(collection(db, 'rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)))),
-      onSnapshot(collection(db, 'predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; }))),
-      onSnapshot(collection(db, 'establishments'), s => setEstablishments(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'settings'), s => setSettings(s.docs.length > 0 ? { id: s.docs[0].id, ...s.docs[0].data() } : null)),
-      onSnapshot(collection(db, 'communications'), s => setCommunications(s.docs.map(d => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'team_import_requests'), s => setTeamImportRequests(s.docs.map(d => ({ id: d.id, ...d.data() }))))
+      onSnapshot(collection(db, 'rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('rounds:', err)),
+      onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), err => console.error('teams:', err)),
+      onSnapshot(collection(db, 'predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('predictions:', err)),
+      onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; })), err => console.error('users:', err)),
     ];
+    if (isAdminUser) {
+      uns.push(
+        onSnapshot(collection(db, 'communications'), s => setCommunications(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('communications:', err)),
+        onSnapshot(collection(db, 'team_import_requests'), s => setTeamImportRequests(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('import_requests:', err)),
+      );
+    }
     return () => uns.forEach(u => u());
+  }, [currentUser?.id, currentUser?.isAdmin]);
+
+  // Configurações baseadas no papel: admin lê /settings completo (com segredos);
+  // usuário comum lê apenas /public_config/main (sem segredos). Ao carregar o
+  // settings completo, o admin espelha os campos públicos em public_config.
+  useEffect(() => {
+    const isAdmin = !!currentUser?.isAdmin;
+    let unsub;
+    if (isAdmin) {
+      unsub = onSnapshot(collection(db, 'settings'), s => {
+        const full = s.docs.length > 0 ? { id: s.docs[0].id, ...s.docs[0].data() } : null;
+        setSettings(full);
+        if (full) {
+          setDoc(doc(db, 'public_config', PUBLIC_CONFIG_ID), pickPublicConfig(full), { merge: true })
+            .catch(err => console.error('sync public_config:', err));
+        }
+      });
+    } else {
+      unsub = onSnapshot(doc(db, 'public_config', PUBLIC_CONFIG_ID), snap => {
+        setSettings(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+      });
+    }
+    return () => { if (unsub) unsub(); };
+  }, [currentUser?.isAdmin]);
+
+  // Observa o estado do Firebase Auth e sincroniza currentUser com o doc /users/{uid}.
+  useEffect(() => {
+    const unsub = observeAuth(async (fbUser) => {
+      if (!fbUser) { setCurrentUser(null); return; }
+      try {
+        const snap = await getDoc(doc(db, 'users', fbUser.uid));
+        const tok = await fbUser.getIdTokenResult();
+        if (snap.exists()) {
+          const data = snap.data();
+          setCurrentUser({ id: fbUser.uid, ...data, isAdmin: tok.claims.admin === true || !!data.isAdmin });
+        } else {
+          // Autenticado sem cadastro no Firestore: encerra a sessão.
+          setCurrentUser(null);
+          await fbLogout();
+        }
+      } catch (e) {
+        console.error('auth observer:', e);
+      }
+    });
+    return () => unsub();
   }, []);
 
-  // Restaura sessão quando usuários são carregados
-  useEffect(() => {
-    let mounted = true;
-    const restore = async () => {
-      const s = readSession();
-      if (!s) return;
-      const ok = await isSessionValid(s);
-      if (!ok) { clearSession(); return; }
-      const u = users.find(u => u.id === s.userId);
-      if (u && mounted) setCurrentUser(u);
-    };
-    if (users && users.length) restore();
-    return () => { mounted = false; };
-  }, [users]);
-
-  // Renova por atividade e impõe expiração por inatividade
+  // Impõe expiração por inatividade (10 min) por cima da sessão do Auth.
   useEffect(() => {
     if (!currentUser) return;
-    const onActivity = () => touchSession();
+    let lastActive = Date.now();
+    const onActivity = () => { lastActive = Date.now(); };
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'visibilitychange', 'focus'];
     events.forEach(e => window.addEventListener(e, onActivity, { passive: true }));
     const checker = setInterval(() => {
-      const s = readSession();
-      if (s && s.expiresAt && Date.now() > s.expiresAt) { logout(); }
+      if (Date.now() - lastActive > SESSION_TIMEOUT_MS) { logout(); }
     }, 15000);
     return () => {
       events.forEach(e => window.removeEventListener(e, onActivity));
@@ -433,19 +441,26 @@ const AppProvider = ({ children }) => {
         return str.length > 11 ? str.slice(-11) : str;
       };
       const phone = normalizeWhatsapp(d.whatsapp);
-      
+
       const usersSnap = await getDocs(collection(db, 'users'));
       const exists = usersSnap.docs.some(doc => normalizeWhatsapp(doc.data().whatsapp) === phone);
       if (exists) {
         throw new Error('WhatsApp já cadastrado!');
       }
+      if (!d.password) throw new Error('Senha obrigatória para criar usuário.');
 
-      const toSave = { ...d, whatsapp: phone };
-      if (toSave.password) {
-        toSave.password = await bcrypt.hash(toSave.password, 10);
-      }
-      const r = await addDoc(collection(db, 'users'), { ...toSave, createdAt: serverTimestamp() });
-      return { id: r.id, ...toSave };
+      // Cria a conta no Firebase Auth (app secundário para não derrubar a sessão do admin).
+      // O uid do Auth vira o ID do doc /users — mantém o vínculo 1:1 das regras.
+      const uid = await adminCreateUser({ whatsapp: phone, password: d.password });
+      const { password, ...rest } = d;
+      const toSave = {
+        ...rest,
+        whatsapp: phone,
+        isAdmin: !!d.isAdmin,
+        balance: d.balance || 0,
+      };
+      await setDoc(doc(db, 'users', uid), { ...toSave, createdAt: serverTimestamp() });
+      return { id: uid, ...toSave };
     },
     updateUser: async (id, d) => {
       const isSelf = currentUser?.id === id;
@@ -453,9 +468,17 @@ const AppProvider = ({ children }) => {
       if (!isAdminUser && !isSelf) throw new Error('Não autorizado');
       const toSave = { ...d };
       if (toSave.password) {
-        toSave.password = await bcrypt.hash(toSave.password, 10);
+        // Senha não é mais armazenada no Firestore — é gerida pelo Firebase Auth.
+        if (isSelf) {
+          await changeOwnPassword(toSave.password);
+        } else {
+          throw new Error('Redefinir a senha de outro usuário exige função de servidor (Admin SDK). Peça ao usuário para usar "esqueci minha senha".');
+        }
+        delete toSave.password;
       }
-      await updateDoc(doc(db, 'users', id), toSave);
+      if (Object.keys(toSave).length) {
+        await updateDoc(doc(db, 'users', id), toSave);
+      }
     },
     deleteUser: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'users', id)); },
     addTeam: async (d) => { 
@@ -749,54 +772,24 @@ const LoginScreen = ({ setView }) => {
 
   const handleLogin = async () => {
     const phone = normalizeWhatsapp(whatsapp);
+    if (!phone || !password) { setError('Informe WhatsApp e senha'); return; }
     let user = null;
-    const candidate = users.find(u => normalizeWhatsapp(u.whatsapp) === phone);
-    if (candidate) {
-      try {
-        const d = await getDoc(doc(db, 'users', candidate.id));
-        if (d.exists()) user = { id: d.id, ...d.data() };
-      } catch (e) { console.error('Erro ao buscar usuário por ID:', e); }
+    try {
+      user = await loginWithWhatsapp(phone, password);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      return;
     }
-    if (!user) {
-      try {
-        const snap = await getDocs(query(collection(db, 'users'), where('whatsapp', '==', phone)));
-        if (snap.docs.length) {
-          const d = snap.docs[0];
-          user = { id: d.id, ...d.data() };
-        }
-      } catch (e) { console.error('Erro ao buscar usuário:', e); }
+    // Define currentUser imediatamente (o observer de Auth confirma em seguida).
+    login(user);
+    // Se manutenção ativa e o usuário não é admin, redireciona para tela de manutenção.
+    if (settings?.maintenanceMode && !user.isAdmin) {
+      setView('maintenance');
+      setError('');
+      return;
     }
-    if (user) {
-      const stored = user.password || '';
-      let ok = false;
-      if (/^\$2[aby]\$/.test(stored)) {
-        try { ok = await bcrypt.compare(password, stored); } catch { ok = false; }
-      } else {
-        // Compatibilidade com senhas legadas em texto plano + migração para hash
-        ok = stored === password;
-        if (ok) {
-          try {
-            // autentica primeiro para cumprir a política do updateUser
-            await login(user);
-            await updateUser(user.id, { password });
-          } catch {}
-        }
-      }
-      if (ok) {
-        // Se manutenção ativa e o usuário não é admin, redireciona para tela de manutenção
-        if (settings?.maintenanceMode && !user.isAdmin) {
-          setView('maintenance');
-          setError('');
-          return;
-        }
-        // garante sessão e view correta
-        await login(user);
-        setView(user.isAdmin ? 'admin' : 'user');
-        setError('');
-        return;
-      }
-    }
-    setError('WhatsApp ou senha incorretos');
+    setView(user.isAdmin ? 'admin' : 'user');
+    setError('');
   };
 
   const handleRegister = async () => {
@@ -811,13 +804,13 @@ const LoginScreen = ({ setView }) => {
     if (users.find(u => normalizeWhatsapp(u.whatsapp) === phone)) return setError('WhatsApp já cadastrado!');
     try {
       await addUser({ name: reg.name, whatsapp: phone, password: reg.password, isAdmin: false, balance: 0, establishmentId: reg.establishmentId || null });
-      alert('✅ Cadastrado!');
+      alert('✅ Cadastrado! Faça login para entrar.');
       setShowRegister(false);
       setWhatsapp(phone);
       setReg({ name: '', whatsapp: '', password: '', confirmPassword: '', establishmentId: '' });
       setError('');
     } catch (e) {
-      setError('Erro: ' + e.message);
+      setError(authErrorMessage(e));
     }
   };
 
@@ -6757,11 +6750,12 @@ const UserPanel = ({ setView }) => {
         setError(''); setStage('creating');
         try { if (typeof onStart === 'function') onStart(); } catch {}
 
-        const wooviAppId = settings?.woovi?.appId?.trim();
+        // wooviEnabled vem do public_config (usuário) ou é derivado do appId (admin).
+        const wooviEnabled = settings?.wooviEnabled ?? !!settings?.woovi?.appId?.trim();
         const cartelaCode = Array.isArray(context?.cartelaCodes) ? context.cartelaCodes[0] : null;
 
         // Modo Woovi: gerar QR Code PIX automático
-        if (wooviAppId && cartelaCode) {
+        if (wooviEnabled && cartelaCode) {
           // Sempre adiciona timestamp para garantir correlationID único no Woovi
           const correlationID = `${cartelaCode}_${Date.now()}`;
           const res = await fetch('/api/payments/woovi-charge', {

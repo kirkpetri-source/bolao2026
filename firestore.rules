@@ -1,0 +1,169 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regras de segurança do Firestore — Bolão Brasileirão
+//
+// Modelo de identidade:
+//  - Autenticação via Firebase Auth (email sintético derivado do WhatsApp).
+//  - O uid do Firebase Auth É IGUAL ao ID do documento em /users (garantido
+//    pela migração e pelo cadastro novo). Logo: request.auth.uid == users/{uid}.
+//  - Admin é identificado pelo campo isAdmin==true no doc /users/{uid}. Esse
+//    campo é protegido nas regras (o usuário não pode alterar o próprio isAdmin),
+//    então é uma fonte de verdade segura — dispensa custom claims/Admin SDK.
+//
+// Princípios:
+//  - Ninguém acessa o banco sem estar autenticado.
+//  - Usuário comum só lê/escreve os próprios dados.
+//  - Campos sensíveis (paid, statusPagamento, isAdmin, balance) só o admin altera.
+//  - Coleções administrativas (rounds, teams, settings, ...) são somente-leitura
+//    para o cliente; escrita só via admin (painel) ou funções serverless (Admin SDK,
+//    que ignora estas regras).
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Campos que o próprio usuário NÃO pode alterar em si mesmo.
+    function protectedUserFieldsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['isAdmin', 'balance', 'password']);
+    }
+
+    // ── Usuários ────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Leitura por qualquer autenticado (o ranking exibe nomes dos participantes).
+      // Observação: senhas NÃO devem existir nesses docs após a migração.
+      allow get, list: if isSignedIn();
+
+      // Criação: o usuário cria o próprio doc no cadastro (uid == doc id),
+      // e nunca pode se autodeclarar admin. Admin pode criar qualquer um.
+      allow create: if isAdmin()
+        || (isSelf(userId) && request.resource.data.isAdmin == false);
+
+      // Update: admin livre; o próprio usuário só campos não sensíveis.
+      allow update: if isAdmin()
+        || (isSelf(userId) && protectedUserFieldsUnchanged());
+
+      allow delete: if isAdmin();
+    }
+
+    // ── Palpites ────────────────────────────────────────────────────────────
+    match /predictions/{predId} {
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow list: if isSignedIn(); // ranking precisa ler a coleção; ajuste se quiser restringir
+
+      // Usuário cria palpite em seu próprio nome e NUNCA marca como pago.
+      allow create: if isAdmin()
+        || (isSignedIn()
+            && request.resource.data.userId == request.auth.uid
+            && request.resource.data.paid == false);
+
+      // Update/delete do próprio palpite, sem mexer no status de pagamento.
+      // O status 'pago' só muda via admin ou webhook (Admin SDK, ignora regras).
+      allow update: if isAdmin()
+        || (isSignedIn()
+            && resource.data.userId == request.auth.uid
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['paid', 'statusPagamento', 'dataPagamento']));
+
+      allow delete: if isAdmin()
+        || (isSignedIn()
+            && resource.data.userId == request.auth.uid
+            && resource.data.paid == false);
+    }
+
+    // ── Coleções administrativas: leitura para autenticados, escrita só admin ─
+    match /rounds/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /teams/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    // Estabelecimentos: leitura pública (aparecem no formulário de cadastro,
+    // antes do login). Não contêm dados sensíveis.
+    match /establishments/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Pedidos de importação de times: apenas admin.
+    match /team_import_requests/{doc} {
+      allow read, write: if isAdmin();
+    }
+    match /communications/{doc} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Configurações: contêm chaves (Woovi/Evolution). Leitura e escrita só admin.
+    // O front do usuário comum lê /public_config, nunca /settings.
+    match /settings/{doc} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Config pública (sem segredos): leitura pública (branding/valor aparecem na
+    // tela de login, antes do login). Só admin escreve.
+    match /public_config/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Eventos de uso/analytics gravados pelo cliente (não sensíveis).
+    match /user_events/{doc} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // Logs/auditoria/histórico escritos pelo painel admin: só admin lê e cria.
+    // Não permitimos update/delete (integridade do histórico).
+    match /admin_events/{doc} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /audit_logs/{doc} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /settings_history/{doc} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /logs/{doc} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Transações de pagamento: leitura só admin; escrita via serverless.
+    match /transactions/{doc} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Qualquer coleção não declarada acima fica bloqueada por padrão.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

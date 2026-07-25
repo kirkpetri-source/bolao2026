@@ -4,3 +4,11 @@ dist/
 .DS_Store
 .vercel
 *.env.local
+# Arquivos de metadados do macOS
+._*
+# Service account do Firebase (segredo — nunca commitar)
+serviceAccountKey.json
+# Arquivo de importação de usuários (contém hashes — não commitar)
+users-import.json
+# Config local do Claude Code (por máquina)
+.claude/settings.local.json

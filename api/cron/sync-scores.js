@@ -181,7 +181,7 @@ export default async function handler(req, res) {
   const dryRun = req.query.dryRun === 'true';
 
   const cronSecret = process.env.CRON_SECRET;
-  if (!dryRun && cronSecret && req.headers['authorization'] !== `Bearer ${cronSecret}`) {
+  if (!dryRun && (!cronSecret || req.headers['authorization'] !== `Bearer ${cronSecret}`)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
