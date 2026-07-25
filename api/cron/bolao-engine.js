@@ -1,5 +1,5 @@
 import { db, getSettings, sendWhatsApp, sendWhatsAppDocument, formatPhone } from '../_shared/firebase.js';
-import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from '../_shared/firestore.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 // Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente.

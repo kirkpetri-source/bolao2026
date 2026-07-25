@@ -1,6 +1,6 @@
 import { db, getSettings } from '../_shared/firebase.js';
 import { getAllTeams } from '../services/footballApi.js';
-import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {

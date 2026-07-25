@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
-import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, adminCreateUser } from './authService.js';
+import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, adminCreateUser, getIdToken } from './authService.js';
 
 // 🔒 DEV PROJECT — banco de dados isolado, NÃO afeta produção
 const firebaseConfig = {
@@ -792,6 +792,24 @@ const LoginScreen = ({ setView }) => {
     setError('');
   };
 
+  const handleForgotPassword = async () => {
+    const phone = normalizeWhatsapp(whatsapp);
+    if (!phone) { setError('Digite seu WhatsApp acima para redefinir a senha'); return; }
+    try {
+      setError('');
+      const resp = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsapp: phone })
+      });
+      await resp.json().catch(() => ({}));
+      // Resposta genérica (não revela se o número existe).
+      alert('Se este WhatsApp estiver cadastrado, você receberá uma senha temporária por mensagem. Verifique seu WhatsApp.');
+    } catch {
+      alert('Não foi possível processar agora. Tente novamente em instantes.');
+    }
+  };
+
   const handleRegister = async () => {
     if (settings?.maintenanceMode) {
       setError('Cadastro temporariamente indisponível durante a manutenção.');
@@ -984,6 +1002,9 @@ const LoginScreen = ({ setView }) => {
             </div>
             <div className="pt-2 space-y-3">
               <button onClick={handleLogin} className="v2-btn-primary w-full py-3.5 text-base">Entrar</button>
+              <button onClick={handleForgotPassword} className="v2-btn-ghost w-full py-2 text-sm">
+                Esqueci minha senha
+              </button>
               <button onClick={() => { setShowRegister(true); setError(''); }} className="v2-btn-outline w-full py-3">
                 <UserPlus size={18} /> Criar Conta
               </button>
@@ -1397,6 +1418,61 @@ const PasswordModal = ({ user, onSave, onCancel }) => {
   );
 };
 
+const UserEditModal = ({ user, onSave, onCancel }) => {
+  const [name, setName] = useState(user.name || '');
+  const [whatsapp, setWhatsapp] = useState(user.whatsapp || '');
+  const [email, setEmail] = useState(user.email || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Nome é obrigatório'); return; }
+    const emailTrim = email.trim();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+      setError('Email inválido'); return;
+    }
+    setError(''); setSaving(true);
+    try {
+      await onSave({ name: name.trim(), whatsapp: whatsapp.replace(/\D/g, ''), email: emailTrim });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-md w-full">
+        <div className="p-6 border-b flex justify-between items-center">
+          <h3 className="text-2xl font-bold">Editar Usuário</h3>
+          <button onClick={onCancel}><X size={24} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Nome</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">WhatsApp</label>
+            <input type="text" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="DDD + número" />
+            <p className="text-xs text-gray-500 mt-1">Alterar o WhatsApp também muda o login do usuário.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Email (contato)</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="email@exemplo.com" />
+          </div>
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+        </div>
+        <div className="p-6 border-t flex gap-3">
+          <button onClick={onCancel} className="flex-1 px-6 py-2 border rounded-lg">Cancelar</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 px-6 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60">
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AdminPanel = ({ setView }) => {
   const { currentUser, setCurrentUser, logout, teams, rounds, users, predictions, establishments, settings, communications, addRound, updateRound, deleteRound, addTeam, updateTeam, deleteTeam, updateUser, deleteUser, resetTeamsToSerieA2026, updatePrediction, updateSettings, addEstablishment, updateEstablishment, deleteEstablishment, addCommunication, updateCommunication, teamImportRequests, submitImportRequestsFromApi, approveImportRequest, rejectImportRequest } = useApp();
   
@@ -1410,6 +1486,7 @@ const AdminPanel = ({ setView }) => {
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [showEstablishmentForm, setShowEstablishmentForm] = useState(false);
   const [editingPassword, setEditingPassword] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
   const [selectedFinanceRound, setSelectedFinanceRound] = useState(null);
   const [selectedDashboardRound, setSelectedDashboardRound] = useState(null);
   const [paymentFilter, setPaymentFilter] = useState('all');
@@ -3669,11 +3746,41 @@ const AdminPanel = ({ setView }) => {
 
   const savePassword = async (newPassword) => {
     try {
-      await updateUser(editingPassword.id, { password: newPassword });
+      if (currentUser?.id === editingPassword.id) {
+        // Troca da própria senha: direto no Firebase Auth.
+        await updateUser(editingPassword.id, { password: newPassword });
+      } else {
+        // Admin redefine senha de outro usuário: via endpoint com Admin SDK.
+        const idToken = await getIdToken();
+        const resp = await fetch('/api/admin/update-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, targetUserId: editingPassword.id, newPassword })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Falha ao redefinir senha');
+      }
       alert('✅ Senha alterada com sucesso!');
       setEditingPassword(null);
     } catch (error) {
       alert('❌ Erro ao alterar senha: ' + error.message);
+    }
+  };
+
+  const saveUser = async (fields) => {
+    try {
+      const idToken = await getIdToken();
+      const resp = await fetch('/api/admin/update-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, targetUserId: editingUser.id, ...fields })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Falha ao salvar');
+      alert('✅ Dados atualizados com sucesso!');
+      setEditingUser(null);
+    } catch (error) {
+      alert('❌ Erro ao atualizar: ' + error.message);
     }
   };
 
@@ -4984,6 +5091,7 @@ const AdminPanel = ({ setView }) => {
                       <div>
                         <h3 className="text-lg font-bold">{user.name}</h3>
                         <p className="text-gray-600 text-sm">{user.whatsapp}</p>
+                        {user.email && <p className="text-gray-500 text-xs">{user.email}</p>}
                         {(() => {
                           const est = establishments.find(e => e.id === user.establishmentId);
                           return est ? (
@@ -5013,8 +5121,15 @@ const AdminPanel = ({ setView }) => {
                           ))}
                         </select>
 
-                        <button 
-                          onClick={() => setEditingPassword(user)} 
+                        <button
+                          onClick={() => setEditingUser(user)}
+                          className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 transition"
+                        >
+                          <Edit2 size={18} />
+                          <span className="hidden sm:inline">Editar</span>
+                        </button>
+                        <button
+                          onClick={() => setEditingPassword(user)}
                           className="flex items-center gap-2 bg-orange-100 text-orange-700 px-4 py-2 rounded-lg hover:bg-orange-200 transition"
                         >
                           <Key size={18} />
@@ -5761,6 +5876,7 @@ const AdminPanel = ({ setView }) => {
       {showTeamForm && <TeamForm team={editingTeam} onSave={saveTeam} onCancel={() => { setEditingTeam(null); setShowTeamForm(false); }} />}
       {showEstablishmentForm && <EstablishmentForm establishment={editingEstablishment} onSave={saveEstablishment} onCancel={() => { setEditingEstablishment(null); setShowEstablishmentForm(false); }} />}
       {editingPassword && <PasswordModal user={editingPassword} onSave={savePassword} onCancel={() => setEditingPassword(null)} />}
+      {editingUser && <UserEditModal user={editingUser} onSave={saveUser} onCancel={() => setEditingUser(null)} />}
 
       {adminPlayerModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={() => setAdminPlayerModal(null)}>

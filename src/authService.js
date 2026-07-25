@@ -52,6 +52,12 @@ export async function logout() {
   await signOut(auth());
 }
 
+// Token do usuário logado, para autenticar chamadas a endpoints admin serverless.
+export async function getIdToken() {
+  const u = auth().currentUser;
+  return u ? await u.getIdToken() : null;
+}
+
 // Admin cria usuário SEM perder a própria sessão: usa um app Firebase secundário.
 // Retorna o uid criado no Auth (o doc /users/{uid} é gravado por quem chama).
 // Obs: definir isAdmin=true para o novo usuário exige custom claim via Admin SDK

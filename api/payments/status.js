@@ -1,5 +1,5 @@
 import { db } from '../_shared/firebase.js';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '../_shared/firestore.js';
 
 export default async function handler(req, res) {
   try {

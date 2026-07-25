@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { db, getSettings } from '../_shared/firebase.js';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from '../_shared/firestore.js';
 
 const WOOVI_API = 'https://api.openpix.com.br/api/v1';
 

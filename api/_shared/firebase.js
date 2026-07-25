@@ -1,17 +1,8 @@
-import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+// Backend usa Admin SDK (ignora as regras — servidor confiável).
+// db é o Firestore do Admin SDK; getSettings lê a coleção 'settings' completa.
+import { getAdminDb } from './firebaseAdmin.js';
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyCDEbEF3wQQck2bbIZfW1tCNROJzJ39cXQ",
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || "bolao-brasileirao-dev-kd.firebaseapp.com",
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || "bolao-brasileirao-dev-kd",
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || "bolao-brasileirao-dev-kd.firebasestorage.app",
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1084218540237",
-  appId: process.env.VITE_FIREBASE_APP_ID || "1:1084218540237:web:3e9b1d8d194a2e93472984"
-};
-
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getAdminDb();
 
 export function formatPhone(phone) {
   let p = String(phone || '').replace(/\D/g, '');
@@ -20,8 +11,7 @@ export function formatPhone(phone) {
 }
 
 export async function getSettings() {
-  const { getDocs, collection } = await import('firebase/firestore');
-  const snap = await getDocs(collection(db, 'settings'));
+  const snap = await db.collection('settings').get();
   return snap.empty ? {} : snap.docs[0].data();
 }
 

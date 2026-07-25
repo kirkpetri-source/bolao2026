@@ -1,5 +1,5 @@
 import { db, getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
-import { collection, getDocs, query, where, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, updateDoc } from '../_shared/firestore.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {

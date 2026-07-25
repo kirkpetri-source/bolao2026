@@ -2,7 +2,7 @@ import { db, getSettings, sendWhatsApp, sendWhatsAppDocument } from '../_shared/
 import { getRoundFixtures, getLiveScores, IN_PROGRESS_STATUSES } from '../services/footballApi.js';
 import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
-} from 'firebase/firestore';
+} from '../_shared/firestore.js';
 
 // Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
 function calcPoints(predHome, predAway, realHome, realAway) {

@@ -1,6 +1,6 @@
 import { db } from '../_shared/firebase.js';
 import { getRoundFixtures, normalizeName } from '../services/footballApi.js';
-import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
 
 const TOTAL_ROUNDS = 38;
 

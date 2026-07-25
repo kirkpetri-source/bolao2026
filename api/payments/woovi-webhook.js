@@ -1,5 +1,5 @@
 import { db, getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
-import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, where } from '../_shared/firestore.js';
 import axios from 'axios';
 
 // Verifica com a API da Woovi se a cobrança realmente foi paga
