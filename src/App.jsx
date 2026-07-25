@@ -763,6 +763,7 @@ const LoginScreen = ({ setView }) => {
   const [showRegister, setShowRegister] = useState(false);
   const [reg, setReg] = useState({ name: '', whatsapp: '', password: '', confirmPassword: '', establishmentId: '' });
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const normalizeWhatsapp = (s) => {
     const d = (s || '').replace(/\D/g, '');
@@ -790,24 +791,6 @@ const LoginScreen = ({ setView }) => {
     }
     setView(user.isAdmin ? 'admin' : 'user');
     setError('');
-  };
-
-  const handleForgotPassword = async () => {
-    const phone = normalizeWhatsapp(whatsapp);
-    if (!phone) { setError('Digite seu WhatsApp acima para redefinir a senha'); return; }
-    try {
-      setError('');
-      const resp = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ whatsapp: phone })
-      });
-      await resp.json().catch(() => ({}));
-      // Resposta genérica (não revela se o número existe).
-      alert('Se este WhatsApp estiver cadastrado, você receberá uma senha temporária por mensagem. Verifique seu WhatsApp.');
-    } catch {
-      alert('Não foi possível processar agora. Tente novamente em instantes.');
-    }
   };
 
   const handleRegister = async () => {
@@ -1002,7 +985,7 @@ const LoginScreen = ({ setView }) => {
             </div>
             <div className="pt-2 space-y-3">
               <button onClick={handleLogin} className="v2-btn-primary w-full py-3.5 text-base">Entrar</button>
-              <button onClick={handleForgotPassword} className="v2-btn-ghost w-full py-2 text-sm">
+              <button onClick={() => { setError(''); setShowForgot(true); }} className="v2-btn-ghost w-full py-2 text-sm">
                 Esqueci minha senha
               </button>
               <button onClick={() => { setShowRegister(true); setError(''); }} className="v2-btn-outline w-full py-3">
@@ -1030,6 +1013,79 @@ const LoginScreen = ({ setView }) => {
           </div>
         </div>
       )}
+      {showForgot && (
+        <ForgotPasswordModal initialWhatsapp={whatsapp} onClose={() => setShowForgot(false)} />
+      )}
+    </div>
+  );
+};
+
+const ForgotPasswordModal = ({ initialWhatsapp, onClose }) => {
+  const [phone, setPhone] = useState(initialWhatsapp || '');
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (digits.length < 10) { setError('Digite um WhatsApp válido (com DDD)'); return; }
+    setError(''); setLoading(true);
+    try {
+      await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsapp: digits })
+      });
+      // Resposta genérica (não revela se o número existe).
+      setDone(true);
+    } catch {
+      setError('Não foi possível processar agora. Tente novamente em instantes.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl max-w-md w-full shadow-modal animate-slide-up">
+        <div className="p-6 border-b flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <Key className="text-campo-600" size={22} />
+            <h3 className="font-display text-xl text-noite-900" style={{ letterSpacing: '0.04em' }}>REDEFINIR SENHA</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+        </div>
+        {done ? (
+          <div className="p-6 space-y-4 text-center">
+            <CheckCircle className="text-green-600 mx-auto" size={40} />
+            <p className="text-noite-700">Se este WhatsApp estiver cadastrado, você receberá uma <strong>senha temporária</strong> por mensagem. Verifique seu WhatsApp e faça login com ela.</p>
+            <button onClick={onClose} className="v2-btn-primary w-full py-3">Entendi</button>
+          </div>
+        ) : (
+          <div className="p-6 space-y-4">
+            <p className="text-sm text-noite-500">Informe o WhatsApp cadastrado. Enviaremos uma senha temporária por mensagem. Confirme abaixo para prosseguir.</p>
+            <div>
+              <label className="v2-label">WhatsApp</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleConfirm()}
+                placeholder="(DDD) número"
+                className="v2-input"
+                autoFocus
+              />
+            </div>
+            {error && <p className="text-red-600 text-sm">{error}</p>}
+            <div className="flex gap-3 pt-1">
+              <button onClick={onClose} className="v2-btn-outline flex-1 py-3">Cancelar</button>
+              <button onClick={handleConfirm} disabled={loading} className="v2-btn-primary flex-1 py-3 disabled:opacity-60">
+                {loading ? 'Enviando...' : 'Redefinir senha'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

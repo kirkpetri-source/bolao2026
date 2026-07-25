@@ -115,10 +115,13 @@ Pendência que exige servidor (Admin SDK) — NÃO funciona só no cliente:
 ## Checklist pós-migração
 
 - [x] Cutover do login no `App.jsx` para Firebase Auth.
-- [ ] Ativar provedor Email/Senha no console (pré-requisito para login funcionar).
-- [ ] Rodar `scripts/migrate-users-to-auth.mjs` (usuários existentes).
-- [ ] Ligar fluxo "esqueci minha senha" (sendPasswordResetEmail ou serverless).
-- [ ] Endpoint serverless (Admin SDK) para admin redefinir senha de terceiros.
-- [ ] Remover senhas em texto/hash do doc `/users` (não são mais fonte de verdade).
-- [ ] Padronizar `CRON_SECRET` obrigatório em todos os `/api/cron/*`.
-- [ ] Remover `api/payments/simulate-pix.js` e `src/App.v1.jsx`.
+- [x] Ativar provedor Email/Senha no console.
+- [x] Importar usuários existentes (`firebase auth:import`).
+- [x] "Esqueci minha senha" (serverless via WhatsApp) — `/api/auth/forgot-password`.
+- [x] Endpoint admin para redefinir senha/editar usuário — `/api/admin/update-user`.
+- [x] Backend migrado para Admin SDK (crons/webhook) — `_shared/firebaseAdmin.js` + shim.
+- [x] Remover senhas dos docs `/users`.
+- [x] Padronizar `CRON_SECRET` obrigatório.
+- [x] Remover `simulate-pix.js` e `App.v1.jsx`.
+- [ ] Limpar doc de admin duplicado (uid Tzquh6ATuw0LV30FXZHt — provável órfão).
+- [ ] Push da branch `feat/firebase-auth` ao GitHub / merge no main (quando autorizado).
