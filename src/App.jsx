@@ -1,58 +1,12 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react';
 import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
+import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
+import { SERIE_A_2026_TEAMS } from './constants.js';
 import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
-
-// 🔒 DEV PROJECT — banco de dados isolado, NÃO afeta produção
-const firebaseConfig = {
-  apiKey: "AIzaSyCDEbEF3wQQck2bbIZfW1tCNROJzJ39cXQ",
-  authDomain: "bolao-brasileirao-dev-kd.firebaseapp.com",
-  projectId: "bolao-brasileirao-dev-kd",
-  storageBucket: "bolao-brasileirao-dev-kd.firebasestorage.app",
-  messagingSenderId: "1084218540237",
-  appId: "1:1084218540237:web:3e9b1d8d194a2e93472984"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// ─── Separação settings (segredos) x public_config (dados públicos) ───────────
-// O admin lê /settings completo (com tokens Woovi/Evolution). O usuário comum lê
-// apenas /public_config/main, que espelha os campos públicos SEM segredos.
-const PUBLIC_CONFIG_ID = 'main';
-function pickPublicConfig(s) {
-  if (!s) return {};
-  return {
-    betValue: s.betValue ?? 15,
-    brandName: s.brandName ?? '',
-    maintenanceMode: !!s.maintenanceMode,
-    maintenanceMessage: s.maintenanceMessage ?? '',
-    maintenanceUntil: s.maintenanceUntil ?? null,
-    maintenanceAllowedIps: s.maintenanceAllowedIps ?? [],
-    rulesText: s.rulesText ?? '',
-    scoringCriteria: s.scoringCriteria ?? '',
-    tiebreakRules: s.tiebreakRules ?? '',
-    termsOfUse: s.termsOfUse ?? '',
-    systemPolicies: s.systemPolicies ?? '',
-    limitsRestrictions: s.limitsRestrictions ?? '',
-    appUrl: s.appUrl ?? '',
-    // Booleano em vez do appId secreto: o cliente só precisa saber se o Woovi está ativo.
-    wooviEnabled: !!(s.woovi?.appId && String(s.woovi.appId).trim()),
-    payment: {
-      pixKey: s.payment?.pixKey ?? s.pixKey ?? '',
-      pixRecipientName: s.payment?.pixRecipientName ?? s.pixRecipientName ?? '',
-      methods: s.payment?.methods ?? { pix: true, card: false },
-    },
-    whatsapp: {
-      number: s.whatsapp?.number ?? '',
-      groupJid: s.whatsapp?.groupJid ?? '',
-    },
-  };
-}
 
 const generateCartelaCode = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
@@ -69,29 +23,6 @@ const fmtBRL = (n) => {
 };
 
 // TIMES OFICIAIS DA SÉRIE A 2026 - CBF
-const SERIE_A_2026_TEAMS = [
-  { name: 'Palmeiras', logo: 'https://logodetimes.com/times/palmeiras/logo-palmeiras-256.png' },
-  { name: 'Flamengo', logo: 'https://logodetimes.com/times/flamengo/logo-flamengo-256.png' },
-  { name: 'Cruzeiro', logo: 'https://logodetimes.com/times/cruzeiro/logo-cruzeiro-256.png' },
-  { name: 'Mirassol', logo: 'https://logodetimes.com/times/mirassol/logo-mirassol-256.png' },
-  { name: 'Botafogo', logo: 'https://logodetimes.com/times/botafogo/logo-botafogo-256.png' },
-  { name: 'Bahia', logo: 'https://logodetimes.com/times/bahia/logo-bahia-256.png' },
-  { name: 'Fluminense', logo: 'https://logodetimes.com/times/fluminense/logo-fluminense-256.png' },
-  { name: 'São Paulo', logo: 'https://logodetimes.com/times/sao-paulo/logo-sao-paulo-256.png' },
-  { name: 'Red Bull Bragantino', logo: 'https://logodetimes.com/times/bragantino/logo-bragantino-256.png' },
-  { name: 'Ceará', logo: 'https://logodetimes.com/times/ceara/logo-ceara-256.png' },
-  { name: 'Vasco da Gama', logo: 'https://logodetimes.com/times/vasco/logo-vasco-256.png' },
-  { name: 'Corinthians', logo: 'https://logodetimes.com/times/corinthians/logo-corinthians-256.png' },
-  { name: 'Grêmio', logo: 'https://logodetimes.com/times/gremio/logo-gremio-256.png' },
-  { name: 'Atlético Mineiro', logo: 'https://logodetimes.com/times/atletico-mineiro/logo-atletico-mineiro-256.png' },
-  { name: 'Internacional', logo: 'https://logodetimes.com/times/internacional/logo-internacional-256.png' },
-  { name: 'Santos', logo: 'https://logodetimes.com/times/santos/logo-santos-256.png' },
-  { name: 'Vitória', logo: 'https://logodetimes.com/times/vitoria/logo-vitoria-256.png' },
-  { name: 'Fortaleza', logo: 'https://logodetimes.com/times/fortaleza/logo-fortaleza-256.png' },
-  { name: 'Juventude', logo: 'https://logodetimes.com/times/juventude/logo-juventude-256.png' },
-  { name: 'Sport', logo: 'https://logodetimes.com/times/sport/logo-sport-256.png' }
-];
-
 const sortMatchesByDate = (a, b) => {
   if (!a.date && !b.date) return 0;
   if (!a.date) return 1;

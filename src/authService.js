@@ -7,6 +7,7 @@ import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   signOut, onAuthStateChanged, updatePassword,
   EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { app } from './firebase.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 
@@ -15,9 +16,9 @@ export function whatsappToEmail(whatsapp) {
   return digits ? `${digits}@${EMAIL_DOMAIN}` : null;
 }
 
-// getAuth()/getFirestore() sem argumento usam o app default já inicializado em App.jsx.
-function auth() { return getAuth(); }
-function db() { return getFirestore(); }
+// Usa explicitamente o app inicializado em firebase.js (sem depender de ordem de import).
+function auth() { return getAuth(app); }
+function db() { return getFirestore(app); }
 
 // Faz login e retorna o doc de /users (com id). Lança erro em credenciais inválidas.
 export async function loginWithWhatsapp(whatsapp, password) {
