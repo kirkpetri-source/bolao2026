@@ -12,3 +12,6 @@ serviceAccountKey.json
 users-import.json
 # Config local do Claude Code (por máquina)
 .claude/settings.local.json
+
+# Backups locais do Firestore (contêm dados — não commitar)
+backups/
