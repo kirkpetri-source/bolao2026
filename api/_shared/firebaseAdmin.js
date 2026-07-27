@@ -8,6 +8,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { readFileSync } from 'node:fs';
 
 function loadServiceAccount() {
@@ -33,4 +34,5 @@ function adminApp() {
 
 export function getAdminAuth() { return getAuth(adminApp()); }
 export function getAdminDb() { return getFirestore(adminApp()); }
+export function getAdminStorage() { return getStorage(adminApp()); }
 export { FieldValue };
