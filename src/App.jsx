@@ -5514,11 +5514,124 @@ const AdminPanel = ({ setView }) => {
                 );
               })()
             ) : (
-              <div className="bg-white rounded-xl p-12 text-center border-2 border-dashed">
-                <DollarSign className="mx-auto text-gray-400 mb-4" size={48} />
-                <h3 className="text-xl font-semibold mb-2">Selecione uma rodada</h3>
-                <p className="text-gray-500">Escolha uma rodada acima para visualizar os pagamentos</p>
-              </div>
+              (() => {
+                // Visão consolidada: soma todas as rodadas (exceto futuras), respeitando o filtro de estabelecimento.
+                const betValue = settings?.betValue || 15;
+                const activeRounds = rounds.filter(r => r.status !== 'upcoming');
+                let totalExpected = 0, totalReceived = 0, totalPending = 0;
+                const byEst = {};
+                const debtByUser = {};
+                for (const round of activeRounds) {
+                  let parts = getRoundParticipants(round.id);
+                  if (establishmentFilter === 'none') parts = parts.filter(p => !p.establishmentId);
+                  else if (establishmentFilter !== 'all') parts = parts.filter(p => p.establishmentId === establishmentFilter);
+                  for (const p of parts) {
+                    totalExpected += betValue;
+                    const estKey = p.establishmentId || 'none';
+                    if (!byEst[estKey]) byEst[estKey] = { expected: 0, received: 0, pending: 0, count: 0 };
+                    byEst[estKey].expected += betValue; byEst[estKey].count += 1;
+                    if (p.paid) { totalReceived += betValue; byEst[estKey].received += betValue; }
+                    else {
+                      totalPending += betValue; byEst[estKey].pending += betValue;
+                      if (!debtByUser[p.userId]) debtByUser[p.userId] = { count: 0, value: 0 };
+                      debtByUser[p.userId].count += 1; debtByUser[p.userId].value += betValue;
+                    }
+                  }
+                }
+                const estRows = Object.entries(byEst).map(([id, v]) => ({
+                  id, name: id === 'none' ? 'Sem estabelecimento' : (establishments.find(e => e.id === id)?.name || 'Estabelecimento'), ...v
+                })).sort((a, b) => b.expected - a.expected);
+                const inadimplentes = Object.entries(debtByUser).map(([uid, d]) => ({
+                  user: users.find(u => u.id === uid), userId: uid, ...d
+                })).filter(x => x.user).sort((a, b) => b.value - a.value);
+                const pct = totalExpected > 0 ? Math.round((totalReceived / totalExpected) * 100) : 0;
+
+                const chargeLink = (u, d) => {
+                  const digits = String(u.whatsapp || '').replace(/\D/g, '');
+                  const num = digits.startsWith('55') ? digits : '55' + digits;
+                  const msg = `Olá ${u.name || ''}! Você tem ${d.count} cartela(s) com pagamento pendente no bolão, totalizando R$ ${d.value.toFixed(2).replace('.', ',')}. Regularize para validar seus pontos. Obrigado!`;
+                  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+                };
+
+                return (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                        <p className="text-blue-600 text-sm font-medium">Total Esperado</p>
+                        <p className="text-xl sm:text-2xl font-bold text-blue-900">R$ {totalExpected.toFixed(2)}</p>
+                        <p className="text-xs text-blue-600 mt-1">{activeRounds.length} rodadas</p>
+                      </div>
+                      <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                        <p className="text-green-600 text-sm font-medium">Recebido</p>
+                        <p className="text-xl sm:text-2xl font-bold text-green-900">R$ {totalReceived.toFixed(2)}</p>
+                        <p className="text-xs text-green-600 mt-1">{pct}% do esperado</p>
+                      </div>
+                      <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
+                        <p className="text-red-600 text-sm font-medium">Pendente</p>
+                        <p className="text-xl sm:text-2xl font-bold text-red-900">R$ {totalPending.toFixed(2)}</p>
+                        <p className="text-xs text-red-600 mt-1">{inadimplentes.length} inadimplentes</p>
+                      </div>
+                      <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
+                        <p className="text-purple-600 text-sm font-medium">Admin (10%)</p>
+                        <p className="text-xl sm:text-2xl font-bold text-purple-900">R$ {(totalReceived * 0.10).toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl border p-5">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2"><Store size={18} /> Por estabelecimento</h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-gray-500 border-b">
+                              <th className="py-2 pr-4">Estabelecimento</th>
+                              <th className="py-2 px-2 text-right">Esperado</th>
+                              <th className="py-2 px-2 text-right">Recebido</th>
+                              <th className="py-2 pl-2 text-right">Pendente</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {estRows.length === 0 && (
+                              <tr><td colSpan="4" className="py-4 text-center text-gray-400">Sem dados.</td></tr>
+                            )}
+                            {estRows.map(r => (
+                              <tr key={r.id} className="border-b last:border-0">
+                                <td className="py-2 pr-4">{r.name}</td>
+                                <td className="py-2 px-2 text-right">R$ {r.expected.toFixed(2)}</td>
+                                <td className="py-2 px-2 text-right text-green-700">R$ {r.received.toFixed(2)}</td>
+                                <td className="py-2 pl-2 text-right text-red-700">R$ {r.pending.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl border p-5">
+                      <h3 className="font-semibold mb-3 flex items-center gap-2"><AlertCircle size={18} className="text-red-500" /> Inadimplentes ({inadimplentes.length})</h3>
+                      {inadimplentes.length === 0 ? (
+                        <p className="text-gray-400 text-sm py-2">Nenhum pagamento pendente. Tudo em dia.</p>
+                      ) : (
+                        <div className="divide-y">
+                          {inadimplentes.map(x => (
+                            <div key={x.userId} className="flex items-center justify-between py-2.5 gap-3">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{x.user.name}</p>
+                                <p className="text-xs text-gray-500">{x.count} cartela(s) • R$ {x.value.toFixed(2).replace('.', ',')}</p>
+                              </div>
+                              {x.user.whatsapp && (
+                                <a href={chargeLink(x.user, x)} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 whitespace-nowrap">
+                                  <Send size={15} /> Cobrar
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </div>
         )}
