@@ -6,50 +6,11 @@ import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
+import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
-
-const generateCartelaCode = () => {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `CART-${timestamp}-${random}`;
-};
 
 const AppContext = createContext();
 const useApp = () => useContext(AppContext);
-
-// Util: moeda BRL
-const fmtBRL = (n) => {
-  try { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n)); } catch { return `R$ ${Number(n).toFixed(2)}`; }
-};
-
-// TIMES OFICIAIS DA SÉRIE A 2026 - CBF
-const sortMatchesByDate = (a, b) => {
-  if (!a.date && !b.date) return 0;
-  if (!a.date) return 1;
-  if (!b.date) return -1;
-  return new Date(a.date) - new Date(b.date);
-};
-
-// Retorna true se o jogo está efetivamente encerrado: flag manual OU status terminal da API
-// OU fallback por tempo (170 min cobre 90 reg + prorrogação completa + pênaltis + margem).
-const MATCH_FINISH_AFTER_MS = 170 * 60 * 1000;
-// Status em andamento (API-Football short codes) — sincronizado com bolao-engine e footballApi.js
-const MATCH_IN_PROGRESS_STATUSES = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'INT', 'LIVE']);
-const isMatchEffectivelyFinished = (match) => {
-  if (match?.finished) return true;
-  if (match?.homeScore == null || match?.awayScore == null) return false;
-  if (!match?.date) return false;
-  // Se a API sinalizou que o jogo ainda está em andamento, não mostrar como finalizado
-  if (match?.matchStatus && MATCH_IN_PROGRESS_STATUSES.has(match.matchStatus)) return false;
-  return Date.now() - new Date(match.date).getTime() >= MATCH_FINISH_AFTER_MS;
-};
-
-const getSafeLogo = (team) => {
-  const url = team?.logo;
-  if (url && typeof url === 'string' && url.startsWith('http')) return url;
-  const name = team?.name || 'Time';
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=ffffff&color=0f172a&size=256`;
-};
 
 const initializeDatabase = async () => {
   try {
@@ -546,39 +507,6 @@ const AppProvider = ({ children }) => {
 };
 
 // Utilitário simples de Markdown -> HTML (negrito, itálico, listas)
-const markdownToHtml = (md) => {
-  if (!md) return '';
-  const escapeHtml = (s) => s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  const lines = md.split('\n');
-  let html = '';
-  let inUl = false;
-  let inOl = false;
-  const inline = (text) =>
-    escapeHtml(text)
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>');
-  for (const raw of lines) {
-    const line = raw.trimRight();
-    if (/^\s*-\s+/.test(line)) {
-      if (!inUl) { html += '<ul>'; inUl = true; }
-      html += `<li>${inline(line.replace(/^\s*-\s+/, ''))}</li>`;
-      continue;
-    } else if (inUl) { html += '</ul>'; inUl = false; }
-    if (/^\s*\d+\.\s+/.test(line)) {
-      if (!inOl) { html += '<ol>'; inOl = true; }
-      html += `<li>${inline(line.replace(/^\s*\d+\.\s+/, ''))}</li>`;
-      continue;
-    } else if (inOl) { html += '</ol>'; inOl = false; }
-    html += `<p>${inline(line)}</p>`;
-  }
-  if (inUl) html += '</ul>';
-  if (inOl) html += '</ol>';
-  return html;
-};
-
 // Componente reutilizável: Regras do Bolão
 const RulesCard = () => {
   const { settings } = useApp();
