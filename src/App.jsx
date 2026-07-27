@@ -7,10 +7,9 @@ import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTempl
 import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
+import { AppContext, useApp } from './AppContext.js';
 import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
 
-const AppContext = createContext();
-const useApp = () => useContext(AppContext);
 
 const initializeDatabase = async () => {
   try {
