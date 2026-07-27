@@ -2,11 +2,10 @@ import React, { useState, useEffect, useRef, createContext, useContext, useMemo 
 import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
-import bcrypt from 'bcryptjs';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
-import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, adminCreateUser, getIdToken } from './authService.js';
+import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
 
 // 🔒 DEV PROJECT — banco de dados isolado, NÃO afeta produção
 const firebaseConfig = {
@@ -149,19 +148,9 @@ const initializeDatabase = async () => {
 
     console.log('🔄 Initializing...');
 
-    // Inicializa usuários apenas se a coleção estiver vazia
-    if (usersSnapshot.empty) {
-      const initialUsers = [
-        { whatsapp: '11999999999', password: 'kirk5364', name: 'Administrador', isAdmin: true, balance: 0 },
-        { whatsapp: '11988888888', password: '123456', name: 'João Silva', isAdmin: false, balance: 150 },
-        { whatsapp: '11977777777', password: '123456', name: 'Maria Santos', isAdmin: false, balance: 200 }
-      ];
-
-      for (const user of initialUsers) {
-        const hashed = await bcrypt.hash(user.password, 10);
-        await addDoc(collection(db, 'users'), { ...user, password: hashed, createdAt: serverTimestamp() });
-      }
-    }
+    // Usuários NÃO são mais semeados aqui: a autenticação é via Firebase Auth.
+    // O admin de um ambiente novo deve ser criado por um script/onboarding que
+    // cria a conta no Auth + o doc /users (sem senha em texto no código).
 
     // Inicializa times apenas se a coleção estiver vazia, com verificação individual
     if (teamsSnapshot.empty) {
@@ -6039,6 +6028,7 @@ const UserPanel = ({ setView }) => {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentContext, setPaymentContext] = useState(null);
   const [paymentLocks, setPaymentLocks] = useState({});
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   // Deep-link para ranking: ?view=user&tab=ranking&round=<id>
   useEffect(() => {
@@ -7485,6 +7475,9 @@ const UserPanel = ({ setView }) => {
                 </span>
               )}
               <DarkToggle />
+              <button onClick={() => setShowChangePassword(true)} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm font-medium transition-colors duration-150">
+                <Key size={15} /> <span className="hidden sm:inline">Senha</span>
+              </button>
               <button onClick={() => { logout(); setView('login'); }} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm font-medium transition-colors duration-150">
                 <LogOut size={15} /> <span className="hidden sm:inline">Sair</span>
               </button>
@@ -8284,6 +8277,70 @@ const UserPanel = ({ setView }) => {
           onError={() => { if (paymentContext?.roundId) setPaymentLocks(prev => ({ ...prev, [paymentContext.roundId]: false })); }}
         />
       )}
+      {showChangePassword && <ChangeMyPasswordModal onClose={() => setShowChangePassword(false)} />}
+    </div>
+  );
+};
+
+const ChangeMyPasswordModal = ({ onClose }) => {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    if (!current) { setError('Informe a senha atual'); return; }
+    if (next.length < 6) { setError('A nova senha deve ter no mínimo 6 caracteres'); return; }
+    if (next !== confirm) { setError('A confirmação não confere'); return; }
+    setError(''); setSaving(true);
+    try {
+      await changeMyPassword(current, next);
+      alert('✅ Senha alterada com sucesso!');
+      onClose();
+    } catch (e) {
+      setError(authErrorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl max-w-md w-full shadow-modal animate-slide-up">
+        <div className="p-6 border-b flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <Key className="text-campo-600" size={22} />
+            <h3 className="font-display text-xl text-noite-900" style={{ letterSpacing: '0.04em' }}>TROCAR MINHA SENHA</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Senha atual</label>
+            <input type={show ? 'text' : 'password'} value={current} onChange={(e) => setCurrent(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="Sua senha atual (ou a temporária)" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Nova senha</label>
+            <input type={show ? 'text' : 'password'} value={next} onChange={(e) => setNext(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="Mínimo 6 caracteres" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Confirmar nova senha</label>
+            <input type={show ? 'text' : 'password'} value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSave()} className="w-full px-4 py-2 border rounded-lg" placeholder="Repita a nova senha" />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar senhas
+          </label>
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+        </div>
+        <div className="p-6 border-t flex gap-3">
+          <button onClick={onClose} className="flex-1 px-6 py-2 border rounded-lg">Cancelar</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 px-6 py-2 bg-green-600 text-white rounded-lg disabled:opacity-60">
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -23,6 +23,22 @@ export default async function handler(req, res) {
     const phone = normWpp((req.body || {}).whatsapp);
     if (!phone) return res.status(400).json({ error: 'Informe o WhatsApp' });
 
+    // Rate limit: no máximo 3 pedidos por número a cada 30 minutos.
+    const RL_MAX = 3;
+    const RL_WINDOW_MS = 30 * 60 * 1000;
+    const now = Date.now();
+    const rlRef = db.collection('rate_limits').doc('pwreset_' + phone);
+    const rlSnap = await rlRef.get();
+    let count = 0, windowStart = now;
+    if (rlSnap.exists) {
+      const d = rlSnap.data();
+      if (now - (d.windowStart || 0) < RL_WINDOW_MS) { count = d.count || 0; windowStart = d.windowStart; }
+    }
+    if (count >= RL_MAX) {
+      return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.' });
+    }
+    await rlRef.set({ count: count + 1, windowStart, updatedAt: now });
+
     const snap = await db.collection('users').where('whatsapp', '==', phone).limit(1).get();
     // Resposta genérica: não revela se o número existe.
     if (snap.empty) return res.status(200).json({ ok: true });

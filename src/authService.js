@@ -4,7 +4,8 @@
 
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, onAuthStateChanged, updatePassword } from 'firebase/auth';
+  signOut, onAuthStateChanged, updatePassword,
+  EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const EMAIL_DOMAIN = 'bolao.users';
@@ -85,6 +86,16 @@ export function observeAuth(callback) {
 export async function changeOwnPassword(newPassword) {
   const u = auth().currentUser;
   if (!u) throw new Error('Não autenticado');
+  await updatePassword(u, newPassword);
+}
+
+// Troca segura da própria senha: reautentica com a senha ATUAL antes de trocar.
+// Evita o erro requires-recent-login e confirma que o usuário conhece a senha atual.
+export async function changeMyPassword(currentPassword, newPassword) {
+  const u = auth().currentUser;
+  if (!u || !u.email) throw new Error('Não autenticado');
+  const cred = EmailAuthProvider.credential(u.email, currentPassword);
+  await reauthenticateWithCredential(u, cred);
   await updatePassword(u, newPassword);
 }
 
