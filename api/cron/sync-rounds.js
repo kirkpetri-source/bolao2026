@@ -98,6 +98,11 @@ export default async function handler(req, res) {
 
         for (const tenant of tenants) {
           const existing = byTenant[tenant.id]?.[roundNum];
+          // Rodada já encerrada e que o tenant nunca teve: não criar. Um bolão
+          // novo começa na rodada atual — rodadas passadas viram fantasmas
+          // ("em andamento" eterno quando a API não tem placar de jogo adiado)
+          // e histórico vazio sem palpites.
+          if (!existing && smartStatus === 'closed') continue;
           if (existing) {
             // Atualiza apenas se a rodada ainda não foi finalizada
             if (['upcoming', 'open'].includes(existing.status)) {
