@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
-import { SERIE_A_2026_TEAMS } from './constants.js';
+import { SERIE_A_2026_TEAMS, TENANT_ID } from './constants.js';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
@@ -18,7 +18,7 @@ const initializeDatabase = async () => {
   try {
     const usersSnapshot = await getDocs(collection(db, 'users'));
     const teamsSnapshot = await getDocs(collection(db, 'teams'));
-    const settingsSnapshot = await getDocs(collection(db, 'settings'));
+    const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)));
     
     // Se já há dados, não reinicializa
     if (!usersSnapshot.empty && !teamsSnapshot.empty) {
@@ -59,6 +59,7 @@ const initializeDatabase = async () => {
 
     if (settingsSnapshot.empty) {
       await addDoc(collection(db, 'settings'), {
+        tenantId: TENANT_ID,
         whatsappMessage: '🏆 *BOLÃO BRASILEIRÃO 2026*\n\n📋 *{RODADA}*\n🎫 *Cartela: {CARTELA}*\n✅ Confirmado!\n\n{PALPITES}\n\n🏦 Pagamento via PIX\n🔑 Chave: {PIX}\n👤 Destinatário: {DESTINATARIO}\n\n💰 R$ 15,00\n⚠️ *Não pode alterar após pagamento*\n\nBoa sorte! 🍀',
         chargeMessageTemplate: 'Olá {NOME},\n\nIdentificamos que o pagamento da sua cartela da {RODADA} ainda está pendente.\n\nValor: R$ {VALOR}\nCartela: {CARTELA}\n\nPor favor, conclua o pagamento para validar sua participação no ranking e na premiação. Obrigado! 🙏',
         devolution: {
@@ -192,7 +193,7 @@ const AppProvider = ({ children }) => {
   // (usados no formulário de cadastro, antes do login).
   useEffect(() => {
     setLoading(false);
-    const unsub = onSnapshot(collection(db, 'establishments'),
+    const unsub = onSnapshot(query(collection(db, 'establishments'), where('tenantId', '==', TENANT_ID)),
       s => setEstablishments(s.docs.map(d => ({ id: d.id, ...d.data() }))),
       err => console.error('establishments:', err));
     return () => unsub();
@@ -209,15 +210,16 @@ const AppProvider = ({ children }) => {
     const isAdminUser = !!currentUser.isAdmin;
     if (isAdminUser) { initializeDatabase().catch(err => console.error('initDb:', err)); }
 
+    const byTenant = (col) => query(collection(db, col), where('tenantId', '==', TENANT_ID));
     const uns = [
-      onSnapshot(collection(db, 'rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('rounds:', err)),
+      onSnapshot(byTenant('rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('rounds:', err)),
       onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), err => console.error('teams:', err)),
-      onSnapshot(collection(db, 'predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('predictions:', err)),
+      onSnapshot(byTenant('predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('predictions:', err)),
       onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; })), err => console.error('users:', err)),
     ];
     if (isAdminUser) {
       uns.push(
-        onSnapshot(collection(db, 'communications'), s => setCommunications(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('communications:', err)),
+        onSnapshot(byTenant('communications'), s => setCommunications(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('communications:', err)),
         onSnapshot(collection(db, 'team_import_requests'), s => setTeamImportRequests(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('import_requests:', err)),
       );
     }
@@ -231,11 +233,11 @@ const AppProvider = ({ children }) => {
     const isAdmin = !!currentUser?.isAdmin;
     let unsub;
     if (isAdmin) {
-      unsub = onSnapshot(collection(db, 'settings'), s => {
+      unsub = onSnapshot(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)), s => {
         const full = s.docs.length > 0 ? { id: s.docs[0].id, ...s.docs[0].data() } : null;
         setSettings(full);
         if (full) {
-          setDoc(doc(db, 'public_config', PUBLIC_CONFIG_ID), pickPublicConfig(full), { merge: true })
+          setDoc(doc(db, 'public_config', PUBLIC_CONFIG_ID), { ...pickPublicConfig(full), tenantId: TENANT_ID }, { merge: true })
             .catch(err => console.error('sync public_config:', err));
         }
       });
@@ -325,16 +327,17 @@ const AppProvider = ({ children }) => {
       };
       const phone = normalizeWhatsapp(d.whatsapp);
 
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const exists = usersSnap.docs.some(doc => normalizeWhatsapp(doc.data().whatsapp) === phone);
-      if (exists) {
-        throw new Error('WhatsApp já cadastrado!');
+      // Duplicidade: melhor esforço (sem login as regras negam a leitura da coleção;
+      // a unicidade real vem do Auth, via e-mail sintético derivado do WhatsApp).
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const exists = usersSnap.docs.some(doc => normalizeWhatsapp(doc.data().whatsapp) === phone);
+        if (exists) throw new Error('WhatsApp já cadastrado!');
+      } catch (e) {
+        if (e?.message === 'WhatsApp já cadastrado!') throw e;
       }
       if (!d.password) throw new Error('Senha obrigatória para criar usuário.');
 
-      // Cria a conta no Firebase Auth (app secundário para não derrubar a sessão do admin).
-      // O uid do Auth vira o ID do doc /users — mantém o vínculo 1:1 das regras.
-      const uid = await adminCreateUser({ whatsapp: phone, password: d.password });
       const { password, ...rest } = d;
       const toSave = {
         ...rest,
@@ -342,7 +345,29 @@ const AppProvider = ({ children }) => {
         isAdmin: !!d.isAdmin,
         balance: d.balance || 0,
       };
-      await setDoc(doc(db, 'users', uid), { ...toSave, createdAt: serverTimestamp() });
+
+      if (currentUser?.isAdmin) {
+        // Admin logado: cria a conta no Auth (app secundário para não derrubar a
+        // sessão) e grava /users + vínculo de membro do tenant como admin/owner.
+        const uid = await adminCreateUser({ whatsapp: phone, password: d.password });
+        await setDoc(doc(db, 'users', uid), { ...toSave, createdAt: serverTimestamp() });
+        await setDoc(doc(db, 'tenants', TENANT_ID, 'members', uid), {
+          role: toSave.isAdmin ? 'owner' : 'participant',
+          name: toSave.name || '',
+          createdAt: serverTimestamp(),
+        });
+        return { id: uid, ...toSave };
+      }
+
+      // Cadastro público (sem login): o app secundário fica autenticado como o novo
+      // usuário e grava o próprio doc + auto-vínculo como participante do tenant
+      // (as regras permitem create do próprio doc e self-join com role participant).
+      const uid = await adminCreateUser({
+        whatsapp: phone,
+        password: d.password,
+        userDoc: { ...toSave, isAdmin: false },
+        tenantId: TENANT_ID,
+      });
       return { id: uid, ...toSave };
     },
     updateUser: async (id, d) => {
@@ -363,7 +388,11 @@ const AppProvider = ({ children }) => {
         await updateDoc(doc(db, 'users', id), toSave);
       }
     },
-    deleteUser: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'users', id)); },
+    deleteUser: async (id) => {
+      requireAdmin();
+      try { await deleteDoc(doc(db, 'tenants', TENANT_ID, 'members', id)); } catch (e) { console.warn('remover membro:', e); }
+      return await deleteDoc(doc(db, 'users', id));
+    },
     addTeam: async (d) => { 
       requireAdmin(); 
       const normalize = (s) => s?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -449,18 +478,19 @@ const AppProvider = ({ children }) => {
       await updateDoc(doc(db, 'team_import_requests', id), { status: 'rejected', rejectedAt: serverTimestamp(), reason: reason || '' });
       await addDoc(collection(db, 'audit_logs'), { type: 'team_import_rejected', requestId: id, actorId: currentUser?.id || null, reason: reason || '', at: serverTimestamp() });
     },
-    addRound: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'rounds'), { ...d, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addRound: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'rounds'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateRound: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'rounds', id), d); },
     deleteRound: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'rounds', id)); },
     addPrediction: async (d) => { 
       if (!currentUser) throw new Error('Não autenticado');
       if (currentUser.id !== d.userId && !currentUser.isAdmin) throw new Error('Não autorizado');
-      const r = await addDoc(collection(db, 'predictions'), { 
-        ...d, 
-        paid: false, 
+      const r = await addDoc(collection(db, 'predictions'), {
+        ...d,
+        tenantId: TENANT_ID,
+        paid: false,
         cartelaCode: d.cartelaCode || generateCartelaCode(),
-        createdAt: serverTimestamp() 
-      }); 
+        createdAt: serverTimestamp()
+      });
       return { id: r.id, ...d }; 
     },
     updatePrediction: async (id, d) => {
@@ -487,7 +517,7 @@ const AppProvider = ({ children }) => {
         throw err;
       }
     },
-    addEstablishment: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'establishments'), { ...d, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addEstablishment: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'establishments'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateEstablishment: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'establishments', id), d); },
     deleteEstablishment: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'establishments', id)); },
     updateSettings: async (d) => {
@@ -501,7 +531,7 @@ const AppProvider = ({ children }) => {
         throw new Error('Configurações não inicializadas');
       }
     },
-    addCommunication: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'communications'), { ...d, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addCommunication: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'communications'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateCommunication: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'communications', id), d); }
   };
 

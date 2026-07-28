@@ -60,11 +60,15 @@ export async function getIdToken() {
   return u ? await u.getIdToken() : null;
 }
 
-// Admin cria usuário SEM perder a própria sessão: usa um app Firebase secundário.
+// Cria conta no Auth SEM afetar a sessão atual: usa um app Firebase secundário.
 // Retorna o uid criado no Auth (o doc /users/{uid} é gravado por quem chama).
 // Obs: definir isAdmin=true para o novo usuário exige custom claim via Admin SDK
 // (não é possível pelo cliente) — o campo isAdmin no doc não concede privilégio real.
-export async function adminCreateUser({ whatsapp, password }) {
+//
+// Cadastro público (chamador sem login): passe userDoc e tenantId — as gravações
+// saem pelo app secundário, autenticado como o PRÓPRIO usuário novo, o que as
+// regras permitem (create do próprio /users e self-join como participant).
+export async function adminCreateUser({ whatsapp, password, userDoc = null, tenantId = null }) {
   const email = whatsappToEmail(whatsapp);
   if (!email) throw new Error('WhatsApp inválido');
   const secondary = initializeApp(getApp().options, 'secondary-' + Date.now());
@@ -72,6 +76,17 @@ export async function adminCreateUser({ whatsapp, password }) {
     const secAuth = getAuth(secondary);
     const cred = await createUserWithEmailAndPassword(secAuth, email, password);
     const uid = cred.user.uid;
+    const secDb = getFirestore(secondary);
+    if (userDoc) {
+      await setDoc(doc(secDb, 'users', uid), { ...userDoc, createdAt: serverTimestamp() });
+    }
+    if (tenantId) {
+      await setDoc(doc(secDb, 'tenants', tenantId, 'members', uid), {
+        role: 'participant',
+        name: userDoc?.name || '',
+        createdAt: serverTimestamp(),
+      });
+    }
     await signOut(secAuth);
     return uid;
   } finally {

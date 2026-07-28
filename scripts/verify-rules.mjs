@@ -2,11 +2,14 @@
  * Verificação automatizada das regras do Firestore contra o projeto real.
  * Entra via Firebase Auth como admin e como usuário comum e testa cada operação,
  * confirmando o que DEVE passar e o que DEVE ser bloqueado. Não deixa lixo (limpa
- * o que cria). USO: node scripts/verify-rules.mjs
+ * o que cria). USO: ADMIN_PWD=xxxx node scripts/verify-rules.mjs
+ *
+ * Multi-tenant (Fase 2): listas de coleções escopadas SÓ passam com filtro
+ * where('tenantId'=='...') e se o usuário for membro do tenant.
  */
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 
 const cfg = {
   apiKey: 'AIzaSyCDEbEF3wQQck2bbIZfW1tCNROJzJ39cXQ',
@@ -21,8 +24,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const email = (wpp) => `${wpp}@bolao.users`;
 
+const TENANT_ID = 'bolao-lion-tech';
+const byTenant = (col, tid = TENANT_ID) => query(collection(db, col), where('tenantId', '==', tid));
+
 // Credenciais do admin lidas do ambiente (nunca hardcode senha no repo).
-// USO: ADMIN_PWD=suaSenha node scripts/verify-rules.mjs
 const ADMIN_WPP = process.env.ADMIN_WPP || '11999999999';
 const ADMIN_PWD = process.env.ADMIN_PWD;
 if (!ADMIN_PWD) {
@@ -48,13 +53,16 @@ async function check(label, expect, fn) {
 }
 
 async function run() {
-  // ── ADMIN ──────────────────────────────────────────────────────────────
+  // ── ADMIN (owner do tenant padrão) ─────────────────────────────────────
   console.log(`\n[ADMIN] ${ADMIN_WPP}`);
   await signInWithEmailAndPassword(auth, email(ADMIN_WPP), ADMIN_PWD);
   await check('ler /users (lista)', 'allow', () => getDocs(collection(db, 'users')));
-  await check('ler /settings (segredos)', 'allow', () => getDocs(collection(db, 'settings')));
-  await check('ler /rounds', 'allow', () => getDocs(collection(db, 'rounds')));
+  await check('ler /settings filtrado por tenant', 'allow', () => getDocs(byTenant('settings')));
+  await check('ler /settings SEM filtro — deve negar', 'deny', () => getDocs(collection(db, 'settings')));
+  await check('ler /rounds filtrado por tenant', 'allow', () => getDocs(byTenant('rounds')));
+  await check('ler /rounds SEM filtro — deve negar', 'deny', () => getDocs(collection(db, 'rounds')));
   await check('ler /public_config', 'allow', () => getDoc(doc(db, 'public_config', 'main')));
+  await check('ler próprio doc de membro', 'allow', () => getDoc(doc(db, 'tenants', TENANT_ID, 'members', auth.currentUser.uid)));
   await signOut(auth);
 
   // ── USUÁRIO COMUM (descartável, criado e removido nesta verificação) ─────
@@ -67,21 +75,31 @@ async function run() {
     return setDoc(doc(db, 'users', uid), { name: 'VERIFY BOT', whatsapp: botWpp, isAdmin: false, balance: 0 });
   });
   if (uid) {
-    await check('ler /rounds', 'allow', () => getDocs(collection(db, 'rounds')));
-    await check('ler /predictions (ranking)', 'allow', () => getDocs(collection(db, 'predictions')));
+    await check('self-join no tenant como participant', 'allow', () =>
+      setDoc(doc(db, 'tenants', TENANT_ID, 'members', uid), { role: 'participant', name: 'VERIFY BOT' }));
+    await check('self-join como OWNER — deve negar', 'deny', () =>
+      setDoc(doc(db, 'tenants', TENANT_ID, 'members', uid), { role: 'owner', name: 'VERIFY BOT' }));
+
+    await check('ler /rounds do tenant (filtrado)', 'allow', () => getDocs(byTenant('rounds')));
+    await check('ler /rounds SEM filtro — deve negar', 'deny', () => getDocs(collection(db, 'rounds')));
+    await check('ler /rounds de OUTRO tenant — deve negar', 'deny', () => getDocs(byTenant('rounds', 'outro-tenant')));
+    await check('ler /predictions do tenant (ranking)', 'allow', () => getDocs(byTenant('predictions')));
     await check('ler /users (nomes p/ ranking)', 'allow', () => getDocs(collection(db, 'users')));
     await check('ler /public_config', 'allow', () => getDoc(doc(db, 'public_config', 'main')));
-    await check('ler /settings (segredos) — deve negar', 'deny', () => getDocs(collection(db, 'settings')));
+    await check('ler /settings do tenant (segredos) — deve negar', 'deny', () => getDocs(byTenant('settings')));
+    await check('listar membros do tenant', 'allow', () => getDocs(collection(db, 'tenants', TENANT_ID, 'members')));
 
     // Escrita: criar palpite próprio não-pago (deve permitir) e limpar depois.
     let createdId = null;
-    await check('criar palpite próprio (paid:false)', 'allow', async () => {
+    await check('criar palpite próprio (paid:false, com tenantId)', 'allow', async () => {
       const r = await addDoc(collection(db, 'predictions'), {
-        userId: uid, roundId: 'VERIFY', matchId: 'VERIFY', homeScore: 0, awayScore: 0,
-        paid: false, cartelaCode: 'VERIFY-TEST',
+        tenantId: TENANT_ID, userId: uid, roundId: 'VERIFY', matchId: 'VERIFY',
+        homeScore: 0, awayScore: 0, paid: false, cartelaCode: 'VERIFY-TEST',
       });
       createdId = r.id; return r;
     });
+    await check('criar palpite SEM tenantId — deve negar', 'deny', () =>
+      addDoc(collection(db, 'predictions'), { userId: uid, roundId: 'X', matchId: 'X', paid: false }));
     // Marcar o próprio palpite como pago (deve NEGAR).
     if (createdId) {
       await check('marcar palpite como pago — deve negar', 'deny',
@@ -94,27 +112,29 @@ async function run() {
       () => updateDoc(doc(db, 'users', uid), { isAdmin: true }));
     // Criar palpite em nome de OUTRO usuário (deve NEGAR).
     await check('criar palpite para outro userId — deve negar', 'deny',
-      () => addDoc(collection(db, 'predictions'), { userId: 'OUTRO', roundId: 'X', matchId: 'X', paid: false }));
+      () => addDoc(collection(db, 'predictions'), { tenantId: TENANT_ID, userId: 'OUTRO', roundId: 'X', matchId: 'X', paid: false }));
     // Auto-remoção da conta Auth do bot (self-delete é permitido).
     try { await auth.currentUser.delete(); } catch {}
     await signOut(auth);
   }
 
-  // Limpeza do doc do bot (só admin pode apagar /users).
+  // Limpeza dos docs do bot (só admin/owner pode apagar /users e members).
   if (uid) {
     try {
       await signInWithEmailAndPassword(auth, email(ADMIN_WPP), ADMIN_PWD);
+      await deleteDoc(doc(db, 'tenants', TENANT_ID, 'members', uid));
       await deleteDoc(doc(db, 'users', uid));
-      console.log('  (limpeza) doc do bot removido pelo admin');
+      console.log('  (limpeza) docs do bot removidos pelo admin');
       await signOut(auth);
-    } catch (e) { console.log(`  (limpeza) não removeu doc do bot: ${e.code || e.message}`); }
+    } catch (e) { console.log(`  (limpeza) não removeu docs do bot: ${e.code || e.message}`); }
   }
 
   // ── NÃO AUTENTICADO ────────────────────────────────────────────────────
   console.log('\n[SEM LOGIN]');
   await check('ler /users sem login — deve negar', 'deny', () => getDocs(collection(db, 'users')));
+  await check('ler /rounds do tenant sem login — deve negar', 'deny', () => getDocs(byTenant('rounds')));
   await check('ler /public_config sem login (branding)', 'allow', () => getDoc(doc(db, 'public_config', 'main')));
-  await check('ler /establishments sem login (cadastro)', 'allow', () => getDocs(collection(db, 'establishments')));
+  await check('ler /establishments sem login (cadastro)', 'allow', () => getDocs(byTenant('establishments')));
 
   console.log(`\nResultado: ${pass} OK, ${fail} FALHA(S)`);
   process.exit(fail ? 1 : 0);

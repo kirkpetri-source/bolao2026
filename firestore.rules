@@ -1,23 +1,26 @@
 rules_version = '2';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Regras de segurança do Firestore — Bolão Brasileirão
+// Regras de segurança do Firestore — Bolão Brasileirão (multi-tenant, Fase 2)
 //
 // Modelo de identidade:
 //  - Autenticação via Firebase Auth (email sintético derivado do WhatsApp).
-//  - O uid do Firebase Auth É IGUAL ao ID do documento em /users (garantido
-//    pela migração e pelo cadastro novo). Logo: request.auth.uid == users/{uid}.
-//  - Admin é identificado pelo campo isAdmin==true no doc /users/{uid}. Esse
-//    campo é protegido nas regras (o usuário não pode alterar o próprio isAdmin),
-//    então é uma fonte de verdade segura — dispensa custom claims/Admin SDK.
+//  - O uid do Auth É IGUAL ao ID do documento em /users.
 //
-// Princípios:
-//  - Ninguém acessa o banco sem estar autenticado.
-//  - Usuário comum só lê/escreve os próprios dados.
-//  - Campos sensíveis (paid, statusPagamento, isAdmin, balance) só o admin altera.
-//  - Coleções administrativas (rounds, teams, settings, ...) são somente-leitura
-//    para o cliente; escrita só via admin (painel) ou funções serverless (Admin SDK,
-//    que ignora estas regras).
+// Modelo multi-tenant:
+//  - Pertencimento: doc em /tenants/{tid}/members/{uid} (role: 'owner'|'participant').
+//  - Docs escopados (rounds, predictions, establishments, communications,
+//    settings, public_config) têm campo tenantId. Toda LISTA precisa filtrar
+//    por tenantId — queries sem filtro são negadas.
+//  - Cadastro público: o próprio usuário cria seu doc em /users e faz
+//    self-join no tenant com role 'participant'.
+//
+// Paridade preservada (endurecer quando o onboarding de novos tenants entrar):
+//  - /users: leitura por qualquer autenticado (ranking exibe nomes). Com um 2º
+//    tenant isso vaza nomes/whatsapp entre tenants — migrar nomes para members.
+//  - /teams e coleções de auditoria/infra: continuam gated por isAdmin()
+//    (campo global users.isAdmin), como antes do multi-tenant.
+//  - /establishments e /public_config: leitura pública (telas pré-login).
 // ─────────────────────────────────────────────────────────────────────────────
 
 service cloud.firestore {
@@ -27,6 +30,7 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Admin global (dono da plataforma) — usado nas coleções não escopadas.
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -37,16 +41,41 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function memberPath(tid) {
+      return /databases/$(database)/documents/tenants/$(tid)/members/$(request.auth.uid);
+    }
+    function isMember(tid) {
+      return isSignedIn() && exists(memberPath(tid));
+    }
+    function isOwner(tid) {
+      return isMember(tid) && get(memberPath(tid)).data.role == 'owner';
+    }
+
     // Campos que o próprio usuário NÃO pode alterar em si mesmo.
     function protectedUserFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['isAdmin', 'balance', 'password']);
     }
 
-    // ── Usuários ────────────────────────────────────────────────────────────
+    // ── Tenants e membros ───────────────────────────────────────────────────
+    match /tenants/{tid} {
+      allow get: if isMember(tid);
+      allow list: if false;                   // sem varredura global de tenants
+      allow create, update, delete: if false; // gestão via Admin SDK (onboarding/billing)
+
+      match /members/{uid} {
+        allow get: if isSignedIn() && (request.auth.uid == uid || isOwner(tid));
+        allow list: if isMember(tid);
+        // Owner gere membros; cadastro público faz self-join como participant.
+        allow create: if isOwner(tid)
+          || (isSelf(uid) && request.resource.data.role == 'participant');
+        allow update, delete: if isOwner(tid);
+      }
+    }
+
+    // ── Usuários (identidade global) ────────────────────────────────────────
     match /users/{userId} {
       // Leitura por qualquer autenticado (o ranking exibe nomes dos participantes).
-      // Observação: senhas NÃO devem existir nesses docs após a migração.
       allow get, list: if isSignedIn();
 
       // Criação: o usuário cria o próprio doc no cadastro (uid == doc id),
@@ -61,97 +90,96 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── Palpites ────────────────────────────────────────────────────────────
-    match /predictions/{predId} {
-      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow list: if isSignedIn(); // ranking precisa ler a coleção; ajuste se quiser restringir
+    // ── Rodadas (escopadas por tenant) ──────────────────────────────────────
+    match /rounds/{doc} {
+      allow read: if isMember(resource.data.tenantId);
+      allow create: if isOwner(request.resource.data.tenantId);
+      allow update, delete: if isOwner(resource.data.tenantId);
+    }
 
-      // Usuário cria palpite em seu próprio nome e NUNCA marca como pago.
-      allow create: if isAdmin()
-        || (isSignedIn()
+    // ── Palpites (escopados por tenant) ─────────────────────────────────────
+    match /predictions/{predId} {
+      allow read: if isMember(resource.data.tenantId);
+
+      // Membro cria palpite em seu próprio nome e NUNCA marca como pago.
+      // Owner pode criar em nome de qualquer participante.
+      allow create: if isOwner(request.resource.data.tenantId)
+        || (isMember(request.resource.data.tenantId)
             && request.resource.data.userId == request.auth.uid
             && request.resource.data.paid == false);
 
-      // Update/delete do próprio palpite, sem mexer no status de pagamento.
-      // O status 'pago' só muda via admin ou webhook (Admin SDK, ignora regras).
-      allow update: if isAdmin()
+      // Update do próprio palpite sem mexer no status de pagamento (e sem
+      // trocar de tenant). O 'pago' só muda via owner ou webhook (Admin SDK).
+      allow update: if isOwner(resource.data.tenantId)
         || (isSignedIn()
             && resource.data.userId == request.auth.uid
             && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['paid', 'statusPagamento', 'dataPagamento']));
+                 .hasAny(['paid', 'statusPagamento', 'dataPagamento', 'tenantId']));
 
-      allow delete: if isAdmin()
+      allow delete: if isOwner(resource.data.tenantId)
         || (isSignedIn()
             && resource.data.userId == request.auth.uid
             && resource.data.paid == false);
     }
 
-    // ── Coleções administrativas: leitura para autenticados, escrita só admin ─
-    match /rounds/{doc} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+    // ── Estabelecimentos: leitura pública (formulário de cadastro, pré-login) ─
+    match /establishments/{doc} {
+      allow read: if true;
+      allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
     }
+
+    // ── Comunicados: só o owner do tenant ───────────────────────────────────
+    match /communications/{doc} {
+      allow read: if isOwner(resource.data.tenantId);
+      allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
+    }
+
+    // ── Configurações (contêm segredos Woovi/Evolution): só o owner ─────────
+    match /settings/{doc} {
+      allow read: if isOwner(resource.data.tenantId);
+      allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
+    }
+
+    // ── Config pública (sem segredos): leitura pública, escrita do owner ────
+    match /public_config/{doc} {
+      allow read: if true;
+      allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
+    }
+
+    // ── Times: catálogo global compartilhado ────────────────────────────────
     match /teams/{doc} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
-    // Estabelecimentos: leitura pública (aparecem no formulário de cadastro,
-    // antes do login). Não contêm dados sensíveis.
-    match /establishments/{doc} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
 
-    // Pedidos de importação de times: apenas admin.
+    // Pedidos de importação de times: apenas admin global.
     match /team_import_requests/{doc} {
       allow read, write: if isAdmin();
     }
-    match /communications/{doc} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
-    }
 
-    // Configurações: contêm chaves (Woovi/Evolution). Leitura e escrita só admin.
-    // O front do usuário comum lê /public_config, nunca /settings.
-    match /settings/{doc} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
-    }
-
-    // Config pública (sem segredos): leitura pública (branding/valor aparecem na
-    // tela de login, antes do login). Só admin escreve.
-    match /public_config/{doc} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // Eventos de uso/analytics gravados pelo cliente (não sensíveis).
+    // ── Eventos de uso/analytics gravados pelo cliente (não sensíveis) ──────
     match /user_events/{doc} {
       allow read: if isAdmin();
       allow create: if isSignedIn();
       allow update, delete: if false;
     }
 
-    // Logs/auditoria/histórico escritos pelo painel admin: só admin lê e cria.
-    // Não permitimos update/delete (integridade do histórico).
+    // ── Logs/auditoria/histórico do painel: só admin lê e cria ──────────────
+    // Sem update/delete (integridade do histórico).
     match /admin_events/{doc} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow read, create: if isAdmin();
       allow update, delete: if false;
     }
     match /audit_logs/{doc} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow read, create: if isAdmin();
       allow update, delete: if false;
     }
     match /settings_history/{doc} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow read, create: if isAdmin();
       allow update, delete: if false;
     }
     match /logs/{doc} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow read, create: if isAdmin();
       allow update, delete: if false;
     }
 
@@ -159,6 +187,10 @@ service cloud.firestore {
     match /transactions/{doc} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+
+    match /rate_limits/{doc} {
+      allow read, write: if false;
     }
 
     // Qualquer coleção não declarada acima fica bloqueada por padrão.

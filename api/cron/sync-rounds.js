@@ -1,6 +1,7 @@
 import { db } from '../_shared/firebase.js';
 import { getRoundFixtures, normalizeName } from '../services/footballApi.js';
 import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
+import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 
 const TOTAL_ROUNDS = 38;
 
@@ -109,6 +110,7 @@ export default async function handler(req, res) {
           }
         } else {
           await addDoc(collection(db, 'rounds'), {
+            tenantId: DEFAULT_TENANT_ID,
             number: roundNum,
             apiRoundNumber: roundNum,
             name: `Rodada ${roundNum}`,
