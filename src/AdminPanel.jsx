@@ -11,6 +11,130 @@ import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, 
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
 
+// Conexão do WhatsApp do bolão via QR Code (Evolution multi-instância).
+// O organizador escaneia o QR com o próprio número; conectado, os envios
+// automáticos (confirmações, cobranças, resultados) passam a usar essa instância.
+const WhatsAppConnectCard = () => {
+  const { tenantId } = useApp();
+  const [conn, setConn] = useState({ loading: true, state: null, number: '', qr: null, error: '' });
+  const pollRef = useRef(null);
+
+  const callApi = async (action) => {
+    const idToken = await getIdToken();
+    const res = await fetch('/api/evolution/instance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken, tenantId, action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Falha na comunicação com o servidor');
+    return data;
+  };
+
+  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+
+  const refresh = async () => {
+    try {
+      const d = await callApi('status');
+      setConn(c => ({ ...c, loading: false, state: d.state, number: d.number || '', error: '', qr: d.state === 'open' ? null : c.qr }));
+      if (d.state === 'open') stopPoll();
+    } catch (e) {
+      setConn(c => ({ ...c, loading: false, error: e.message }));
+      stopPoll();
+    }
+  };
+
+  useEffect(() => { refresh(); return stopPoll; }, [tenantId]);
+
+  const handleConnect = async () => {
+    setConn(c => ({ ...c, loading: true, error: '' }));
+    try {
+      const d = await callApi('connect');
+      if (d.state === 'open') {
+        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, error: '' });
+        return;
+      }
+      setConn({ loading: false, state: 'connecting', number: '', qr: d.qr, error: d.qr ? '' : (d.note || 'QR indisponível — tente novamente') });
+      stopPoll();
+      pollRef.current = setInterval(refresh, 4000);
+    } catch (e) {
+      setConn(c => ({ ...c, loading: false, error: e.message }));
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm('Desconectar o WhatsApp deste bolão? Os envios automáticos param até conectar de novo.')) return;
+    setConn(c => ({ ...c, loading: true, error: '' }));
+    try {
+      await callApi('disconnect');
+      setConn({ loading: false, state: 'close', number: '', qr: null, error: '' });
+    } catch (e) {
+      setConn(c => ({ ...c, loading: false, error: e.message }));
+    }
+  };
+
+  const qrSrc = conn.qr ? (conn.qr.startsWith('data:') ? conn.qr : `data:image/png;base64,${conn.qr}`) : null;
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border p-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-bold">Conexão do WhatsApp do seu bolão</h3>
+        {conn.state === 'open' && <span className="text-xs font-bold px-2 py-1 rounded-full bg-green-100 text-green-700">CONECTADO</span>}
+        {conn.state === 'connecting' && <span className="text-xs font-bold px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">AGUARDANDO QR</span>}
+        {(conn.state === 'close' || conn.state === 'not_created') && <span className="text-xs font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-600">DESCONECTADO</span>}
+      </div>
+
+      {conn.loading && (
+        <div className="flex items-center gap-2 text-gray-500 py-4"><Loader2 size={18} className="animate-spin" /> Verificando conexão...</div>
+      )}
+
+      {!conn.loading && conn.state === 'open' && (
+        <div>
+          <p className="text-sm text-gray-600 mb-4">
+            WhatsApp conectado{conn.number ? <> como <strong>+{conn.number}</strong></> : ''}. As confirmações de cartela,
+            cobranças e resultados das rodadas são enviados automaticamente por este número.
+          </p>
+          <button onClick={handleDisconnect} className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm">Desconectar</button>
+        </div>
+      )}
+
+      {!conn.loading && conn.state !== 'open' && (
+        <div>
+          {qrSrc ? (
+            <div className="flex flex-col sm:flex-row gap-5 items-center">
+              <img src={qrSrc} alt="QR Code para conectar o WhatsApp" className="w-52 h-52 border rounded-xl bg-white p-2" />
+              <div className="text-sm text-gray-600 space-y-2">
+                <p className="font-semibold text-gray-800">Escaneie com o celular do bolão:</p>
+                <ol className="list-decimal pl-5 space-y-1">
+                  <li>Abra o <strong>WhatsApp</strong> no celular</li>
+                  <li>Toque em <strong>Aparelhos conectados</strong></li>
+                  <li>Toque em <strong>Conectar um aparelho</strong></li>
+                  <li>Aponte a câmera para este QR Code</li>
+                </ol>
+                <p className="text-xs text-gray-400">O código expira em ~1 minuto. A tela atualiza sozinha quando conectar.</p>
+                <button onClick={handleConnect} className="px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2"><RefreshCcw size={14} /> Gerar novo QR</button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-gray-600 mb-4">
+                Conecte o número de WhatsApp do seu bolão escaneando um QR Code. Com o número conectado,
+                o sistema envia automaticamente as confirmações de cartela, cobranças e resultados
+                das rodadas para os seus participantes.
+              </p>
+              <button onClick={handleConnect} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold inline-flex items-center gap-2">
+                <Send size={16} /> Conectar WhatsApp (QR Code)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {conn.error && <p className="text-sm text-red-600 mt-3">{conn.error}</p>}
+    </div>
+  );
+};
+
 const EstablishmentForm = ({ establishment, onSave, onCancel }) => {
   const [formData, setFormData] = useState(establishment || { name: '', contact: '', phone: '', commission: 5 });
 
@@ -3457,20 +3581,7 @@ const AdminPanel = ({ setView }) => {
             {/* WhatsApp Settings */}
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
-                {!currentUser?.globalAdmin && (
-                  <div className="bg-white rounded-xl shadow-sm border p-6">
-                    <h3 className="text-lg font-bold mb-2">Conexão do WhatsApp do seu bolão</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Em breve você vai conectar o seu próprio número de WhatsApp escaneando um QR Code
-                      aqui mesmo. Com o número conectado, o sistema envia automaticamente as confirmações
-                      de cartela, cobranças e resultados das rodadas para os seus participantes.
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Enquanto isso, os envios automáticos ficam desativados neste bolão — os templates
-                      abaixo já podem ser personalizados e serão usados assim que a conexão for ativada.
-                    </p>
-                  </div>
-                )}
+                {!currentUser?.globalAdmin && <WhatsAppConnectCard />}
                 {currentUser?.globalAdmin && (
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <h3 className="text-lg font-bold mb-4">Credenciais e Notificações</h3>
