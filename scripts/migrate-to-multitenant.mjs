@@ -5,8 +5,8 @@
  *  - Coleção nova `tenants/{tenantId}`: 1 doc por organizador (nome, dono, plano).
  *  - Campo `tenantId` adicionado em: rounds, predictions, establishments,
  *    communications, settings, public_config.
- *  - Coleção nova `memberships/{autoId}`: liga user ↔ tenant ↔ papel
- *    (owner p/ admin atual, participant p/ demais). Um user pode ter vários.
+ *  - Subcoleção `tenants/{tid}/members/{uid}`: papel do usuário no tenant
+ *    (owner p/ admin atual, participant p/ demais). Doc ID = uid facilita as regras.
  *  - `users` e `teams` continuam globais (identidade e times compartilhados).
  *  - Os dados atuais viram o TENANT PADRÃO (o bolão do Kirk).
  *
@@ -56,18 +56,21 @@ async function main() {
     }
   }
 
-  // 3) memberships para cada usuário
-  const memColl = db.collection('memberships');
-  const existingMem = await memColl.where('tenantId', '==', TENANT_ID).get();
-  const jaTem = new Set(existingMem.docs.map(d => d.data().userId));
+  // 3) members: subcoleção tenants/{TENANT_ID}/members/{uid}
+  const membersColl = tenantRef.collection('members');
+  const existingMem = await membersColl.get();
+  const jaTem = new Set(existingMem.docs.map(d => d.id));
   let owners = 0, parts = 0, criados = 0;
   for (const u of usersSnap.docs) {
-    if (jaTem.has(u.id)) continue;
     const role = u.data().isAdmin === true ? 'owner' : 'participant';
     if (role === 'owner') owners++; else parts++;
-    if (COMMIT) { await memColl.add({ tenantId: TENANT_ID, userId: u.id, role, createdAt: FieldValue.serverTimestamp() }); criados++; }
+    if (jaTem.has(u.id)) continue;
+    if (COMMIT) {
+      await membersColl.doc(u.id).set({ role, name: u.data().name || '', createdAt: FieldValue.serverTimestamp() });
+      criados++;
+    }
   }
-  console.log(`memberships: ${owners} owner(s) + ${parts} participante(s) ${COMMIT ? `→ ${criados} criados` : '(seriam criados)'}`);
+  console.log(`members (tenants/${TENANT_ID}/members): ${owners} owner(s) + ${parts} participante(s) ${COMMIT ? `→ ${criados} criados` : '(seriam criados)'}`);
 
   console.log(`\n${COMMIT ? 'Migração aplicada.' : 'DRY-RUN concluído. Nada foi gravado. Rode com --commit para aplicar.'}`);
   process.exit(0);
