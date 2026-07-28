@@ -152,7 +152,8 @@ const AppProvider = ({ children }) => {
   // pode trocar para o lastTenantId do usuário (ver observer de Auth abaixo).
   const [tenantId, setTenantId] = useState(() => resolveTenantId());
   const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState([]);            // usuários globais (identidade)
+  const [tenantMembers, setTenantMembers] = useState([]); // membros do tenant atual
   const [teams, setTeams] = useState([]);
   const [rounds, setRounds] = useState([]);
   const [predictions, setPredictions] = useState([]);
@@ -209,7 +210,7 @@ const AppProvider = ({ children }) => {
   useEffect(() => {
     if (!currentUser) {
       setUsers([]); setTeams([]); setRounds([]); setPredictions([]);
-      setCommunications([]); setTeamImportRequests([]);
+      setCommunications([]); setTeamImportRequests([]); setTenantMembers([]);
       return;
     }
     const isAdminUser = !!currentUser.isAdmin;
@@ -221,6 +222,7 @@ const AppProvider = ({ children }) => {
       onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), err => console.error('teams:', err)),
       onSnapshot(byTenant('predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('predictions:', err)),
       onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; })), err => console.error('users:', err)),
+      onSnapshot(collection(db, 'tenants', tenantId, 'members'), s => setTenantMembers(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('members:', err)),
     ];
     if (isAdminUser) {
       uns.push(
@@ -347,9 +349,14 @@ const AppProvider = ({ children }) => {
     });
   };
 
+  // Usuários visíveis no app = apenas os membros do bolão atual.
+  // A identidade continua global, mas cada bolão só enxerga os próprios participantes.
+  const memberIds = new Set(tenantMembers.map(m => m.id));
+  const tenantUsers = users.filter(u => memberIds.has(u.id));
+
   const value = {
-    currentUser, setCurrentUser, users, teams, rounds, predictions, establishments, settings, communications, teamImportRequests, loading,
-    tenantId, login, logout, darkMode, toggleDark,
+    currentUser, setCurrentUser, users: tenantUsers, teams, rounds, predictions, establishments, settings, communications, teamImportRequests, loading,
+    tenantId, tenantMembers, login, logout, darkMode, toggleDark,
     addUser: async (d) => {
       const normalizeWhatsapp = (s) => {
         const str = (s || '').replace(/\D/g, '');

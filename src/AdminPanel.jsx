@@ -3441,7 +3441,8 @@ const AdminPanel = ({ setView }) => {
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {[
                   { key: 'whatsapp', label: 'WhatsApp', icon: Send },
-                  { key: 'integracoes', label: 'Integrações', icon: Key },
+                  // Integrações (Woovi/grupo) são de plataforma — só o admin global vê.
+                  ...(currentUser?.globalAdmin ? [{ key: 'integracoes', label: 'Integrações', icon: Key }] : []),
                   { key: 'maintenance', label: 'Manutenção', icon: AlertCircle },
                   { key: 'rules', label: 'Regras', icon: FileText },
                   { key: 'bet', label: 'Aposta', icon: DollarSign }
@@ -3456,6 +3457,21 @@ const AdminPanel = ({ setView }) => {
             {/* WhatsApp Settings */}
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
+                {!currentUser?.globalAdmin && (
+                  <div className="bg-white rounded-xl shadow-sm border p-6">
+                    <h3 className="text-lg font-bold mb-2">Conexão do WhatsApp do seu bolão</h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Em breve você vai conectar o seu próprio número de WhatsApp escaneando um QR Code
+                      aqui mesmo. Com o número conectado, o sistema envia automaticamente as confirmações
+                      de cartela, cobranças e resultados das rodadas para os seus participantes.
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      Enquanto isso, os envios automáticos ficam desativados neste bolão — os templates
+                      abaixo já podem ser personalizados e serão usados assim que a conexão for ativada.
+                    </p>
+                  </div>
+                )}
+                {currentUser?.globalAdmin && (
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <h3 className="text-lg font-bold mb-4">Credenciais e Notificações</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -3507,6 +3523,7 @@ const AdminPanel = ({ setView }) => {
                     <label className="flex items-center gap-2"><input type="checkbox" checked={!!whatsappNotifyEvents.results} onChange={(e) => setWhatsappNotifyEvents({ ...whatsappNotifyEvents, results: e.target.checked })} />Resultados</label>
                   </div>
                 </div>
+                )}
 
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <h3 className="text-lg font-bold mb-4">Template de Mensagens Padrão</h3>
@@ -3679,8 +3696,8 @@ const AdminPanel = ({ setView }) => {
             )}
 
 
-            {/* Integrações */}
-            {settingsTab === 'integracoes' && (
+            {/* Integrações (plataforma — só admin global) */}
+            {settingsTab === 'integracoes' && currentUser?.globalAdmin && (
               <div className="space-y-6 max-w-3xl">
                 <div className="bg-white rounded-xl shadow-sm border p-6">
                   <h3 className="text-lg font-bold mb-1">Woovi / OpenPix — PIX Automático</h3>
