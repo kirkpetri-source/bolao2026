@@ -1,6 +1,8 @@
 // Backend usa Admin SDK (ignora as regras — servidor confiável).
-// db é o Firestore do Admin SDK; getSettings lê a coleção 'settings' completa.
+// db é o Firestore do Admin SDK; getSettings lê o /settings de UM tenant
+// (sem argumento: o tenant padrão — usado pelos endpoints de plataforma).
 import { getAdminDb } from './firebaseAdmin.js';
+import { DEFAULT_TENANT_ID } from './tenant.js';
 
 export const db = getAdminDb();
 
@@ -10,8 +12,8 @@ export function formatPhone(phone) {
   return p;
 }
 
-export async function getSettings() {
-  const snap = await db.collection('settings').get();
+export async function getSettings(tenantId = DEFAULT_TENANT_ID) {
+  const snap = await db.collection('settings').where('tenantId', '==', tenantId).limit(1).get();
   return snap.empty ? {} : snap.docs[0].data();
 }
 

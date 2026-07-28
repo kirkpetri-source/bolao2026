@@ -3,6 +3,7 @@ import { getRoundFixtures, getLiveScores, IN_PROGRESS_STATUSES } from '../servic
 import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
 } from '../_shared/firestore.js';
+import { listTenants, getUsersById } from '../_shared/tenant.js';
 
 // Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
 function calcPoints(predHome, predAway, realHome, realAway) {
@@ -81,8 +82,8 @@ async function generateRankingPdf(roundName, ranking) {
   }
 }
 
-async function finalizeRound(roundId, roundData, settings) {
-  const adminPhone = (settings?.whatsapp?.number || process.env.ADMIN_WHATSAPP_NUMBER || '');
+async function finalizeRound(roundId, roundData, settings, userNames) {
+  const adminPhone = (settings?.whatsapp?.number || '');
   const groupJid = settings?.whatsapp?.groupJid || '';
   const roundName = roundData.name || `Rodada ${roundData.number}`;
 
@@ -92,11 +93,6 @@ async function finalizeRound(roundId, roundData, settings) {
     await updateDoc(doc(db, 'rounds', roundId), { status: 'finished', resultadoCalculado: true, resultSentToGroup: true });
     return;
   }
-
-  // Buscar nomes dos usuários
-  const usersSnap = await getDocs(collection(db, 'users'));
-  const userNames = {};
-  usersSnap.docs.forEach(d => { userNames[d.id] = d.data().name || 'Participante'; });
 
   // Agrupar palpites por cartela (userId + cartelaCode) — nunca acumular entre cartelas
   const cartelaPoints = {};
@@ -138,7 +134,7 @@ async function finalizeRound(roundId, roundData, settings) {
   if (target) {
     const winner = ranking[0];
     const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-    let msg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
+    let msg = `🏆 *${(settings?.brandName || 'BOLÃO BRASILEIRÃO').toUpperCase()} — ${roundName} ENCERRADA!*\n\n`;
     if (winner) {
       msg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
       msg += `🎯 ${winner.points} pontos\n\n`;
@@ -189,167 +185,183 @@ export default async function handler(req, res) {
   const dryRunReport = [];
 
   try {
-    const settings = await getSettings();
-    const apiFootballKey = settings?.footballApi?.key || process.env.APIFOOTBALL_KEY;
+    // Chave da API de futebol é de plataforma: settings do tenant padrão ou env.
+    const platformSettings = await getSettings();
+    const apiFootballKey = platformSettings?.footballApi?.key || process.env.APIFOOTBALL_KEY;
 
-    // Buscar rodadas fechadas que ainda precisam de processamento:
-    // - tem jogos não finalizados (API pode atualizar placares), OU
-    // - todos os jogos já estão finalizados mas resultadoCalculado ainda não foi gravado
-    //   (cobre o caso em que bolao-engine marcou matches via Step 4 mas sync-scores não rodou ainda)
+    const tenants = await listTenants();
+    const usersById = await getUsersById();
+    const userNames = {};
+    Object.values(usersById).forEach(u => { userNames[u.id] = u.name || 'Participante'; });
+
+    // Rodadas fechadas pendentes de processamento, agrupadas por tenant
     const roundsSnap = await getDocs(collection(db, 'rounds'));
-    const activeRounds = roundsSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(r => {
-        if (r.status !== 'closed') return false;
-        if (r.resultadoCalculado) return false;
-        // Incluir se: tem jogos pendentes OU todos já finalizados (para não perder o disparo)
-        return r.matches?.length > 0;
-      });
+    const activeByTenant = {};
+    roundsSnap.docs.forEach(d => {
+      const r = { id: d.id, ...d.data() };
+      if (r.status !== 'closed' || r.resultadoCalculado || !r.matches?.length || !r.tenantId) return;
+      (activeByTenant[r.tenantId] = activeByTenant[r.tenantId] || []).push(r);
+    });
 
-    if (!activeRounds.length) {
+    if (!Object.keys(activeByTenant).length) {
       return res.status(200).json({ success: true, dryRun, logs: ['Nenhuma rodada ativa com jogos pendentes.'] });
     }
 
-    // Tentar buscar live scores via API-Football primeiro
+    // Tentar buscar live scores via API-Football primeiro (uma vez para todos os tenants)
     const liveScores = await getLiveScores(apiFootballKey);
     const liveMap = {};
     liveScores.forEach(s => { liveMap[s.apiEventId] = s; });
 
-    for (const round of activeRounds) {
-      const roundNum = round.apiRoundNumber || round.number;
-      const roundName = round.name || `Rodada ${roundNum}`;
-      let updatedMatches = [...round.matches];
-      let scoresChanged = false;
-
-      // Buscar scores atuais do TheSportsDB para esta rodada
-      let apiFixtures = [];
-      try {
-        apiFixtures = await getRoundFixtures(roundNum);
-      } catch (err) {
-        logs.push(`Erro ao buscar rodada ${roundNum} da API: ${err.message}`);
-        continue;
+    // Cache de fixtures por rodada: vários tenants compartilham as mesmas rodadas do campeonato
+    const fixturesCache = {};
+    const getFixturesCached = async (roundNum) => {
+      if (!(roundNum in fixturesCache)) {
+        fixturesCache[roundNum] = await getRoundFixtures(roundNum);
       }
+      return fixturesCache[roundNum];
+    };
 
-      const apiMap = {};
-      apiFixtures.forEach(f => { apiMap[f.apiEventId] = f; });
+    for (const tenant of tenants) {
+      const activeRounds = activeByTenant[tenant.id] || [];
+      if (!activeRounds.length) continue;
 
-      updatedMatches = updatedMatches.map(match => {
-        const live = liveMap[match.apiEventId];
-        const api = apiMap[match.apiEventId];
-        const source = live || api;
+      const settings = await getSettings(tenant.id);
 
-        if (!source) return match;
+      for (const round of activeRounds) {
+        const roundNum = round.apiRoundNumber || round.number;
+        const roundName = round.name || `Rodada ${roundNum}`;
+        let updatedMatches = [...round.matches];
+        let scoresChanged = false;
 
-        const homeScore = source.homeScore !== undefined ? source.homeScore : match.homeScore;
-        const awayScore = source.awayScore !== undefined ? source.awayScore : match.awayScore;
-        const finished = source.finished ?? match.finished;
-        // Propaga matchStatus para que bolao-engine possa detectar jogos ainda em andamento
-        // (ex: 'ET' = prorrogação, 'P' = pênaltis, 'BT' = intervalo prorrogação)
-        const matchStatus = source.matchStatus ?? match.matchStatus ?? null;
-
-        if (
-          homeScore !== match.homeScore ||
-          awayScore !== match.awayScore ||
-          finished !== match.finished ||
-          matchStatus !== (match.matchStatus ?? null)
-        ) {
-          scoresChanged = true;
+        // Buscar scores atuais do TheSportsDB para esta rodada
+        let apiFixtures = [];
+        try {
+          apiFixtures = await getFixturesCached(roundNum);
+        } catch (err) {
+          logs.push(`[${tenant.id}] Erro ao buscar rodada ${roundNum} da API: ${err.message}`);
+          continue;
         }
 
-        return {
-          ...match,
-          homeScore,
-          awayScore,
-          finished,
-          ...(matchStatus !== null ? { matchStatus } : {})
-        };
-      });
+        const apiMap = {};
+        apiFixtures.forEach(f => { apiMap[f.apiEventId] = f; });
 
-      if (dryRun) {
-        // Modo simulação: reportar o que seria feito, sem gravar
-        const matchReport = updatedMatches.map(m => ({
-          home: m.homeTeamName,
-          away: m.awayTeamName,
-          score: m.homeScore !== null ? `${m.homeScore}x${m.awayScore}` : 'pendente',
-          finished: m.finished,
-          matchStatus: m.matchStatus ?? null,
-          inProgress: m.matchStatus ? IN_PROGRESS_STATUSES.has(m.matchStatus) : false,
-          source: liveMap[m.apiEventId] ? 'api-football-live' : apiMap[m.apiEventId] ? 'thesportsdb' : 'sem-fonte'
-        }));
-        logs.push(`[DRY RUN] Rodada ${roundNum}: placares ${scoresChanged ? 'teriam sido atualizados' : 'sem alteração'}`);
+        updatedMatches = updatedMatches.map(match => {
+          const live = liveMap[match.apiEventId];
+          const api = apiMap[match.apiEventId];
+          const source = live || api;
+
+          if (!source) return match;
+
+          const homeScore = source.homeScore !== undefined ? source.homeScore : match.homeScore;
+          const awayScore = source.awayScore !== undefined ? source.awayScore : match.awayScore;
+          const finished = source.finished ?? match.finished;
+          // Propaga matchStatus para que bolao-engine possa detectar jogos ainda em andamento
+          // (ex: 'ET' = prorrogação, 'P' = pênaltis, 'BT' = intervalo prorrogação)
+          const matchStatus = source.matchStatus ?? match.matchStatus ?? null;
+
+          if (
+            homeScore !== match.homeScore ||
+            awayScore !== match.awayScore ||
+            finished !== match.finished ||
+            matchStatus !== (match.matchStatus ?? null)
+          ) {
+            scoresChanged = true;
+          }
+
+          return {
+            ...match,
+            homeScore,
+            awayScore,
+            finished,
+            ...(matchStatus !== null ? { matchStatus } : {})
+          };
+        });
+
+        if (dryRun) {
+          // Modo simulação: reportar o que seria feito, sem gravar
+          const matchReport = updatedMatches.map(m => ({
+            home: m.homeTeamName,
+            away: m.awayTeamName,
+            score: m.homeScore !== null ? `${m.homeScore}x${m.awayScore}` : 'pendente',
+            finished: m.finished,
+            matchStatus: m.matchStatus ?? null,
+            inProgress: m.matchStatus ? IN_PROGRESS_STATUSES.has(m.matchStatus) : false,
+            source: liveMap[m.apiEventId] ? 'api-football-live' : apiMap[m.apiEventId] ? 'thesportsdb' : 'sem-fonte'
+          }));
+          logs.push(`[DRY RUN] [${tenant.id}] Rodada ${roundNum}: placares ${scoresChanged ? 'teriam sido atualizados' : 'sem alteração'}`);
+
+          const allDone = updatedMatches.every(m => m.finished);
+          if (allDone && !round.resultadoCalculado) {
+            // Simular cálculo de pontos para o relatório
+            const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', round.id)));
+
+            const userPoints = {};
+            for (const predDoc of predsSnap.docs) {
+              const pred = predDoc.data();
+              let totalPoints = 0;
+              if (Array.isArray(pred.predictions)) {
+                for (const p of pred.predictions) {
+                  const match = updatedMatches.find(m => m.id === p.matchId || m.apiEventId === p.apiEventId);
+                  if (match?.finished) totalPoints += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
+                }
+              } else if (pred.matchId !== undefined) {
+                const match = updatedMatches.find(m => m.id === pred.matchId);
+                if (match?.finished) totalPoints = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
+              }
+              const uid = pred.userId;
+              if (!userPoints[uid]) userPoints[uid] = { name: userNames[uid] || 'Participante', points: 0 };
+              userPoints[uid].points += totalPoints;
+            }
+
+            const ranking = Object.entries(userPoints)
+              .map(([uid, data]) => ({ userId: uid, name: data.name, points: data.points }))
+              .sort((a, b) => b.points - a.points);
+
+            const groupJid = settings?.whatsapp?.groupJid || '';
+            logs.push(`[DRY RUN] [${tenant.id}] Rodada ${roundNum}: FINALIZARIA agora`);
+            dryRunReport.push({
+              tenant: tenant.id,
+              round: roundName,
+              roundId: round.id,
+              allMatchesFinished: true,
+              scoresChanged,
+              matches: matchReport,
+              ranking,
+              wouldSendTo: groupJid ? `grupo: ${groupJid}` : `admin: ${settings?.whatsapp?.number || '(não configurado)'}`,
+              wouldSendPdf: !!groupJid,
+              action: 'FINALIZARIA: status→finished, ranking gravado, PDF enviado ao grupo'
+            });
+          } else {
+            dryRunReport.push({
+              tenant: tenant.id,
+              round: roundName,
+              roundId: round.id,
+              allMatchesFinished: updatedMatches.every(m => m.finished),
+              scoresChanged,
+              matches: matchReport,
+              action: allDone && round.resultadoCalculado
+                ? 'já finalizada (resultadoCalculado=true)'
+                : 'aguardando jogos pendentes'
+            });
+          }
+          continue;
+        }
+
+        // Modo real: gravar e enviar normalmente
+        if (scoresChanged) {
+          await updateDoc(doc(db, 'rounds', round.id), {
+            matches: updatedMatches,
+            liveScoreUpdatedAt: serverTimestamp()
+          });
+          logs.push(`[${tenant.id}] Rodada ${roundNum}: placares atualizados`);
+        }
 
         const allDone = updatedMatches.every(m => m.finished);
         if (allDone && !round.resultadoCalculado) {
-          // Simular cálculo de pontos para o relatório
-          const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', round.id)));
-          const usersSnap = await getDocs(collection(db, 'users'));
-          const userNames = {};
-          usersSnap.docs.forEach(d => { userNames[d.id] = d.data().name || 'Participante'; });
-
-          const userPoints = {};
-          for (const predDoc of predsSnap.docs) {
-            const pred = predDoc.data();
-            let totalPoints = 0;
-            if (Array.isArray(pred.predictions)) {
-              for (const p of pred.predictions) {
-                const match = updatedMatches.find(m => m.id === p.matchId || m.apiEventId === p.apiEventId);
-                if (match?.finished) totalPoints += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
-              }
-            } else if (pred.matchId !== undefined) {
-              const match = updatedMatches.find(m => m.id === pred.matchId);
-              if (match?.finished) totalPoints = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
-            }
-            const uid = pred.userId;
-            if (!userPoints[uid]) userPoints[uid] = { name: userNames[uid] || 'Participante', points: 0 };
-            userPoints[uid].points += totalPoints;
-          }
-
-          const ranking = Object.entries(userPoints)
-            .map(([uid, data]) => ({ userId: uid, name: data.name, points: data.points }))
-            .sort((a, b) => b.points - a.points);
-
-          const groupJid = settings?.whatsapp?.groupJid || '';
-          logs.push(`[DRY RUN] Rodada ${roundNum}: FINALIZARIA agora`);
-          dryRunReport.push({
-            round: roundName,
-            roundId: round.id,
-            allMatchesFinished: true,
-            scoresChanged,
-            matches: matchReport,
-            ranking,
-            wouldSendTo: groupJid ? `grupo: ${groupJid}` : `admin: ${settings?.whatsapp?.number || '(não configurado)'}`,
-            wouldSendPdf: !!groupJid,
-            action: 'FINALIZARIA: status→finished, ranking gravado, PDF enviado ao grupo'
-          });
-        } else {
-          dryRunReport.push({
-            round: roundName,
-            roundId: round.id,
-            allMatchesFinished: updatedMatches.every(m => m.finished),
-            scoresChanged,
-            matches: matchReport,
-            action: allDone && round.resultadoCalculado
-              ? 'já finalizada (resultadoCalculado=true)'
-              : 'aguardando jogos pendentes'
-          });
+          logs.push(`[${tenant.id}] Rodada ${roundNum}: todos os jogos terminaram — finalizando...`);
+          await finalizeRound(round.id, { ...round, matches: updatedMatches }, settings, userNames);
+          logs.push(`[${tenant.id}] Rodada ${roundNum}: finalizada.`);
         }
-        continue;
-      }
-
-      // Modo real: gravar e enviar normalmente
-      if (scoresChanged) {
-        await updateDoc(doc(db, 'rounds', round.id), {
-          matches: updatedMatches,
-          liveScoreUpdatedAt: serverTimestamp()
-        });
-        logs.push(`Rodada ${roundNum}: placares atualizados`);
-      }
-
-      const allDone = updatedMatches.every(m => m.finished);
-      if (allDone && !round.resultadoCalculado) {
-        logs.push(`Rodada ${roundNum}: todos os jogos terminaram — finalizando...`);
-        await finalizeRound(round.id, { ...round, matches: updatedMatches }, settings);
-        logs.push(`Rodada ${roundNum}: finalizada, PDF enviado ao grupo.`);
       }
     }
 

@@ -1,5 +1,6 @@
 import { db, getSettings, sendWhatsApp, sendWhatsAppDocument, formatPhone } from '../_shared/firebase.js';
 import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from '../_shared/firestore.js';
+import { DEFAULT_TENANT_ID, listTenants, getUsersById, getTenantParticipants } from '../_shared/tenant.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 // Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente.
@@ -111,13 +112,10 @@ async function generateRankingPdf(roundName, ranking) {
 
 // Calcula o ranking de uma rodada a partir dos palpites pagos no Firestore
 // Retorna: [{ userId, name, cartelaCode, points }] ordenado decrescente
-async function calcRoundRanking(roundId, roundMatches) {
+async function calcRoundRanking(roundId, roundMatches, nameMap) {
   const predsSnap = await getDocs(
     query(collection(db, 'predictions'), where('roundId', '==', roundId))
   );
-  const usersSnap = await getDocs(collection(db, 'users'));
-  const nameMap = {};
-  usersSnap.docs.forEach(d => { nameMap[d.id] = d.data().name || 'Participante'; });
 
   // Agrupar palpites por cartela (userId + cartelaCode)
   const cartelas = {};
@@ -150,6 +148,265 @@ async function calcRoundRanking(roundId, roundMatches) {
   return ranking.sort((a, b) => b.points - a.points);
 }
 
+// Processa todas as etapas do motor para UM tenant.
+async function processTenant(tenant, usersById, now, logs) {
+  const tag = `[${tenant.id}]`;
+  const settings = await getSettings(tenant.id);
+  // Fallbacks de número/env só valem para o tenant padrão — um bolão novo sem
+  // WhatsApp configurado simplesmente não envia nada.
+  const ADMIN_PHONE = formatPhone(
+    settings?.whatsapp?.number
+    || (tenant.id === DEFAULT_TENANT_ID ? (process.env.ADMIN_WHATSAPP_NUMBER || '5511999999999') : '')
+  );
+  const GROUP_JID = (settings?.whatsapp?.groupJid || '').trim();
+
+  const nameMap = {};
+  Object.values(usersById).forEach(u => { nameMap[u.id] = u.name || 'Participante'; });
+  const participants = (await getTenantParticipants(tenant.id, usersById))
+    .filter(u => !u.isAdmin && u.whatsapp);
+
+  // Envia para o grupo se configurado; caso contrário envia individualmente
+  const broadcastMsg = async (msg) => {
+    if (GROUP_JID) {
+      await sendWhatsApp(GROUP_JID, msg, settings);
+    } else {
+      for (const user of participants) {
+        await sendWhatsApp(formatPhone(user.whatsapp), msg, settings);
+      }
+    }
+  };
+
+  const roundsSnap = await getDocs(query(collection(db, 'rounds'), where('tenantId', '==', tenant.id)));
+  const allRounds = roundsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // ─── Step 1: AUTO-ABERTURA ─────────────────────────────────────────────────
+  // Rodadas 'upcoming' com 1º jogo em ≤ 5 dias → abrir e notificar
+  for (const roundDoc of roundsSnap.docs) {
+    const round = roundDoc.data();
+    const roundId = roundDoc.id;
+    const roundName = round.name || `Rodada ${round.number}`;
+
+    if (round.status !== 'upcoming' || !round.matches?.length) continue;
+
+    const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstMatchDate = new Date(sorted[0].date);
+    const daysDiff = (firstMatchDate - now) / (1000 * 60 * 60 * 24);
+
+    if (daysDiff > 5 || daysDiff <= 0) continue;
+
+    await updateDoc(doc(db, 'rounds', roundId), { status: 'open' });
+    logs.push(`${tag} ${roundName} aberta automaticamente (${daysDiff.toFixed(1)} dias para o 1º jogo).`);
+
+    if (!round.notificacaoAberturaEnviada) {
+      await updateDoc(doc(db, 'rounds', roundId), { notificacaoAberturaEnviada: true });
+      const msg = `✅ *${settings?.brandName || 'Bolão Brasileirão'}*\nA *${roundName}* foi aberta para palpites! Vocês têm até ${Math.ceil(daysDiff)} dia(s) para apostar. Boa sorte! ⚽`;
+      await broadcastMsg(msg);
+      logs.push(`${tag} Notificação de abertura da ${roundName} enviada ${GROUP_JID ? 'ao grupo' : 'individualmente'}.`);
+    }
+  }
+
+  // ─── Step 2: ALERTA 1 HORA ────────────────────────────────────────────────
+  // Rodadas abertas, 1h antes do fechamento
+  for (const roundDoc of roundsSnap.docs) {
+    const round = roundDoc.data();
+    const roundId = roundDoc.id;
+    const roundName = round.name || `Rodada ${round.number}`;
+
+    if (round.status !== 'open' || !round.matches?.length) continue;
+
+    const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstMatchDate = new Date(sorted[0].date);
+    const lockTime = new Date(firstMatchDate.getTime() - 5 * 60 * 1000);
+    const hoursDiff = (lockTime - now) / (1000 * 60 * 60);
+
+    if (hoursDiff > 1 || hoursDiff <= 0 || round.alertaFaltando1hEnviado) continue;
+
+    await updateDoc(doc(db, 'rounds', roundId), { alertaFaltando1hEnviado: true });
+
+    if (GROUP_JID) {
+      await sendWhatsApp(GROUP_JID, `⏰ *Atenção, pessoal!*\nA *${roundName}* fecha em 1 hora! Quem ainda não apostou, corre lá! ⚽`, settings);
+      logs.push(`${tag} Alerta de 1h da ${roundName} enviado ao grupo.`);
+    } else {
+      const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', roundId)));
+      const bettorsIds = new Set(predsSnap.docs.map(d => d.data().userId));
+      let count = 0;
+      for (const user of participants) {
+        if (!bettorsIds.has(user.id)) {
+          await sendWhatsApp(formatPhone(user.whatsapp), `⏰ *Atenção!*\nA *${roundName}* fecha em 1 hora! Acesse o sistema agora e registre seus palpites!`, settings);
+          count++;
+        }
+      }
+      logs.push(`${tag} Alerta de 1h enviado para ${count} usuários sem palpite na ${roundName}.`);
+    }
+  }
+
+  // ─── Step 3: AUTO-FECHAMENTO ──────────────────────────────────────────────
+  // 5 min antes do 1º jogo → fechar + notificar
+  for (const roundDoc of roundsSnap.docs) {
+    const round = roundDoc.data();
+    const roundId = roundDoc.id;
+    const roundName = round.name || `Rodada ${round.number}`;
+
+    if (!round.matches?.length) continue;
+
+    const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const lockTime = new Date(new Date(sorted[0].date).getTime() - 5 * 60 * 1000);
+
+    if (round.status === 'open' && lockTime <= now) {
+      await updateDoc(doc(db, 'rounds', roundId), { status: 'closed' });
+      logs.push(`${tag} ${roundName} fechada automaticamente (5 min antes do 1º jogo).`);
+    }
+
+    const jaFechada = round.status === 'open' || round.status === 'closed';
+    if (jaFechada && lockTime <= now && !round.notificacaoFechamentoEnviada) {
+      await updateDoc(doc(db, 'rounds', roundId), { notificacaoFechamentoEnviada: true });
+      const msg = `🔒 *${roundName} fechada!*\nOs palpites estão encerrados. Bora torcer! ⚽🔥`;
+      if (GROUP_JID) {
+        await sendWhatsApp(GROUP_JID, msg, settings);
+        logs.push(`${tag} Notificação de fechamento da ${roundName} enviada ao grupo.`);
+      } else if (ADMIN_PHONE) {
+        await sendWhatsApp(ADMIN_PHONE, msg, settings);
+        logs.push(`${tag} Notificação de fechamento da ${roundName} enviada ao admin.`);
+      }
+    }
+  }
+
+  // ─── Step 4: AUTO-FINALIZAÇÃO DE MATCHES ─────────────────────────────────
+  // Matches com placar, finished=false, e data passada há tempo suficiente → finished=true
+  for (const roundDoc of roundsSnap.docs) {
+    const round = roundDoc.data();
+    const roundId = roundDoc.id;
+    if (round.status !== 'closed' && round.status !== 'finished') continue;
+    if (!round.matches?.length) continue;
+
+    let changed = false;
+    const updatedMatches = round.matches.map(match => {
+      if (match.finished) return match;
+      if (match.homeScore == null || match.awayScore == null) return match;
+      if (!match.date) return match;
+      // Se a API sinalizou que o jogo está em andamento (prorrogação, pênaltis, etc.),
+      // NÃO finalizar — aguardar sync-scores atualizar com status terminal
+      if (match.matchStatus && IN_PROGRESS_STATUSES.has(match.matchStatus)) return match;
+      if (Date.now() - new Date(match.date).getTime() >= FINISH_AFTER_MS) {
+        changed = true;
+        return { ...match, finished: true };
+      }
+      return match;
+    });
+
+    if (changed) {
+      await updateDoc(doc(db, 'rounds', roundId), { matches: updatedMatches });
+      logs.push(`${tag} Matches auto-finalizados na ${round.name || roundDoc.id}.`);
+    }
+  }
+
+  // ─── Step 5: AUTO-FINALIZAÇÃO DE RODADAS ─────────────────────────────────
+  // Rodadas 'closed', não ainda finalizadas, onde TODOS os matches estão encerrados:
+  // → calcular ranking → enviar resultado ao grupo (texto + PDF) → status 'finished'
+  // Reler o snapshot atualizado para capturar matches recém-marcados no Step 4.
+  const roundsSnap2 = await getDocs(query(collection(db, 'rounds'), where('tenantId', '==', tenant.id)));
+
+  for (const roundDoc of roundsSnap2.docs) {
+    const round = roundDoc.data();
+    const roundId = roundDoc.id;
+
+    if (round.status !== 'closed') continue;
+    if (round.resultadoCalculado) continue;       // já processado
+    if (!round.matches?.length) continue;
+
+    // Verificar se TODOS os jogos estão efetivamente encerrados
+    const allDone = round.matches.every(isEffectivelyFinished);
+    if (!allDone) continue;
+
+    const roundName = round.name || `Rodada ${round.number}`;
+    logs.push(`${tag} ${roundName}: todos os jogos encerrados — finalizando...`);
+
+    // Idempotency: gravar flag ANTES de qualquer operação pesada
+    await updateDoc(doc(db, 'rounds', roundId), { resultadoCalculado: true });
+
+    // Calcular ranking com scoring correto (3pts/1pt, apenas cartelas pagas)
+    const ranking = await calcRoundRanking(roundId, round.matches, nameMap);
+
+    // Buscar próxima rodada (upcoming ou open, número maior)
+    const nextRound = allRounds
+      .filter(r => (r.status === 'upcoming' || r.status === 'open') && (r.number || 0) > (round.number || 0))
+      .sort((a, b) => (a.number || 0) - (b.number || 0))[0];
+
+    // Link para o ranking da app (fallback se PDF falhar)
+    const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
+    const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
+
+    // Montar mensagem de resultado
+    const winner = ranking[0];
+    const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    let resultMsg = `🏆 *${(settings?.brandName || 'BOLÃO BRASILEIRÃO').toUpperCase()} — ${roundName} ENCERRADA!*\n\n`;
+
+    if (winner) {
+      resultMsg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
+      resultMsg += `🎯 ${winner.points} pontos\n\n`;
+    }
+
+    if (ranking.length > 0) {
+      resultMsg += `📊 *Top 5:*\n`;
+      ranking.slice(0, 5).forEach((r, i) => {
+        resultMsg += `${medals[i] || `${i + 1}.`} ${r.name} (${r.cartelaCode}) — ${r.points} pts\n`;
+      });
+    }
+
+    resultMsg += `\n🙏 Obrigado a todos que participaram desta rodada!`;
+
+    if (nextRound) {
+      const nextMatches = (nextRound.matches || []).sort((a, b) => new Date(a.date) - new Date(b.date));
+      const nextFirst = nextMatches[0];
+      const nextDateStr = nextFirst?.date
+        ? new Date(nextFirst.date).toLocaleDateString('pt-BR', {
+            weekday: 'long', day: '2-digit', month: '2-digit',
+            timeZone: 'America/Sao_Paulo'
+          })
+        : null;
+      resultMsg += `\n\n📢 *Próxima: ${nextRound.name}*`;
+      if (nextDateStr) resultMsg += ` — começa ${nextDateStr}`;
+      resultMsg += `\nFique ligado e faça seus palpites! ⚽`;
+    }
+
+    if (rankingLink) resultMsg += `\n\n📋 *Ranking completo:*\n${rankingLink}`;
+
+    // Gerar e enviar PDF; verificar retorno e logar falha sem bloquear
+    const target = GROUP_JID || ADMIN_PHONE;
+    if (target) {
+      const pdfBase64 = await generateRankingPdf(roundName, ranking);
+      if (pdfBase64) {
+        const pdfOk = await sendWhatsAppDocument(
+          target,
+          pdfBase64,
+          `resultado-${round.number || roundId}.pdf`,
+          `📊 Resultado completo — ${roundName}`,
+          settings
+        );
+        if (pdfOk) {
+          logs.push(`${tag} PDF do resultado da ${roundName} enviado ${GROUP_JID ? 'ao grupo' : 'ao admin'}.`);
+        } else {
+          logs.push(`${tag} [AVISO] PDF da ${roundName} não foi entregue — link incluído na mensagem como fallback.`);
+        }
+      } else {
+        logs.push(`${tag} [AVISO] PDF da ${roundName} não pôde ser gerado — link incluído na mensagem.`);
+      }
+      await sendWhatsApp(target, resultMsg, settings);
+      logs.push(`${tag} Mensagem de resultado da ${roundName} enviada.`);
+    }
+
+    // Marcar rodada como finalizada
+    await updateDoc(doc(db, 'rounds', roundId), {
+      status: 'finished',
+      resultSentToGroup: !!GROUP_JID,
+      ranking,
+      finishedAt: serverTimestamp()
+    });
+
+    logs.push(`${tag} ${roundName} marcada como finalizada automaticamente.`);
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -161,257 +418,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const settings = await getSettings();
-    const ADMIN_PHONE = formatPhone(settings?.whatsapp?.number || process.env.ADMIN_WHATSAPP_NUMBER || '5511999999999');
-    const GROUP_JID = (settings?.whatsapp?.groupJid || '').trim();
-
-    // Envia para o grupo se configurado; caso contrário envia individualmente para cada usuário
-    const broadcastMsg = async (msg, usersSnap) => {
-      if (GROUP_JID) {
-        await sendWhatsApp(GROUP_JID, msg, settings);
-      } else if (usersSnap) {
-        for (const userDoc of usersSnap.docs) {
-          const user = userDoc.data();
-          if (!user.isAdmin && user.whatsapp) {
-            await sendWhatsApp(formatPhone(user.whatsapp), msg, settings);
-          }
-        }
-      }
-    };
-
-    const roundsSnap = await getDocs(collection(db, 'rounds'));
-    const allRounds = roundsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     const now = new Date();
     const logs = [];
+    const tenants = await listTenants();
+    const usersById = await getUsersById();
 
-    // ─── Step 1: AUTO-ABERTURA ─────────────────────────────────────────────────
-    // Rodadas 'upcoming' com 1º jogo em ≤ 5 dias → abrir e notificar
-    for (const roundDoc of roundsSnap.docs) {
-      const round = roundDoc.data();
-      const roundId = roundDoc.id;
-      const roundName = round.name || `Rodada ${round.number}`;
-
-      if (round.status !== 'upcoming' || !round.matches?.length) continue;
-
-      const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-      const firstMatchDate = new Date(sorted[0].date);
-      const daysDiff = (firstMatchDate - now) / (1000 * 60 * 60 * 24);
-
-      if (daysDiff > 5 || daysDiff <= 0) continue;
-
-      await updateDoc(doc(db, 'rounds', roundId), { status: 'open' });
-      logs.push(`${roundName} aberta automaticamente (${daysDiff.toFixed(1)} dias para o 1º jogo).`);
-
-      if (!round.notificacaoAberturaEnviada) {
-        await updateDoc(doc(db, 'rounds', roundId), { notificacaoAberturaEnviada: true });
-        const msg = `✅ *Bolão Brasileirão*\nA *${roundName}* foi aberta para palpites! Vocês têm até ${Math.ceil(daysDiff)} dia(s) para apostar. Boa sorte! ⚽`;
-        const usersSnap = GROUP_JID ? null : await getDocs(collection(db, 'users'));
-        await broadcastMsg(msg, usersSnap);
-        logs.push(`Notificação de abertura da ${roundName} enviada ${GROUP_JID ? 'ao grupo' : 'individualmente'}.`);
+    for (const tenant of tenants) {
+      try {
+        await processTenant(tenant, usersById, now, logs);
+      } catch (err) {
+        // Falha em um tenant não pode derrubar os demais
+        console.error(`bolao-engine [${tenant.id}]:`, err);
+        logs.push(`[${tenant.id}] ERRO: ${err.message}`);
       }
-    }
-
-    // ─── Step 2: ALERTA 1 HORA ────────────────────────────────────────────────
-    // Rodadas abertas, 1h antes do fechamento
-    for (const roundDoc of roundsSnap.docs) {
-      const round = roundDoc.data();
-      const roundId = roundDoc.id;
-      const roundName = round.name || `Rodada ${round.number}`;
-
-      if (round.status !== 'open' || !round.matches?.length) continue;
-
-      const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-      const firstMatchDate = new Date(sorted[0].date);
-      const lockTime = new Date(firstMatchDate.getTime() - 5 * 60 * 1000);
-      const hoursDiff = (lockTime - now) / (1000 * 60 * 60);
-
-      if (hoursDiff > 1 || hoursDiff <= 0 || round.alertaFaltando1hEnviado) continue;
-
-      await updateDoc(doc(db, 'rounds', roundId), { alertaFaltando1hEnviado: true });
-
-      if (GROUP_JID) {
-        await sendWhatsApp(GROUP_JID, `⏰ *Atenção, pessoal!*\nA *${roundName}* fecha em 1 hora! Quem ainda não apostou, corre lá! ⚽`, settings);
-        logs.push(`Alerta de 1h da ${roundName} enviado ao grupo.`);
-      } else {
-        const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', roundId)));
-        const bettorsIds = new Set(predsSnap.docs.map(d => d.data().userId));
-        const usersSnap = await getDocs(collection(db, 'users'));
-        let count = 0;
-        for (const userDoc of usersSnap.docs) {
-          const user = userDoc.data();
-          if (!user.isAdmin && user.whatsapp && !bettorsIds.has(userDoc.id)) {
-            await sendWhatsApp(formatPhone(user.whatsapp), `⏰ *Atenção!*\nA *${roundName}* fecha em 1 hora! Acesse o sistema agora e registre seus palpites!`, settings);
-            count++;
-          }
-        }
-        logs.push(`Alerta de 1h enviado para ${count} usuários sem palpite na ${roundName}.`);
-      }
-    }
-
-    // ─── Step 3: AUTO-FECHAMENTO ──────────────────────────────────────────────
-    // 5 min antes do 1º jogo → fechar + notificar
-    for (const roundDoc of roundsSnap.docs) {
-      const round = roundDoc.data();
-      const roundId = roundDoc.id;
-      const roundName = round.name || `Rodada ${round.number}`;
-
-      if (!round.matches?.length) continue;
-
-      const sorted = [...round.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-      const lockTime = new Date(new Date(sorted[0].date).getTime() - 5 * 60 * 1000);
-
-      if (round.status === 'open' && lockTime <= now) {
-        await updateDoc(doc(db, 'rounds', roundId), { status: 'closed' });
-        logs.push(`${roundName} fechada automaticamente (5 min antes do 1º jogo).`);
-      }
-
-      const jaFechada = round.status === 'open' || round.status === 'closed';
-      if (jaFechada && lockTime <= now && !round.notificacaoFechamentoEnviada) {
-        await updateDoc(doc(db, 'rounds', roundId), { notificacaoFechamentoEnviada: true });
-        const msg = `🔒 *${roundName} fechada!*\nOs palpites estão encerrados. Bora torcer! ⚽🔥`;
-        if (GROUP_JID) {
-          await sendWhatsApp(GROUP_JID, msg, settings);
-          logs.push(`Notificação de fechamento da ${roundName} enviada ao grupo.`);
-        } else {
-          await sendWhatsApp(ADMIN_PHONE, msg, settings);
-          logs.push(`Notificação de fechamento da ${roundName} enviada ao admin.`);
-        }
-      }
-    }
-
-    // ─── Step 4: AUTO-FINALIZAÇÃO DE MATCHES ─────────────────────────────────
-    // Matches com placar, finished=false, e data passada há ≥115min → finished=true
-    for (const roundDoc of roundsSnap.docs) {
-      const round = roundDoc.data();
-      const roundId = roundDoc.id;
-      if (round.status !== 'closed' && round.status !== 'finished') continue;
-      if (!round.matches?.length) continue;
-
-      let changed = false;
-      const updatedMatches = round.matches.map(match => {
-        if (match.finished) return match;
-        if (match.homeScore == null || match.awayScore == null) return match;
-        if (!match.date) return match;
-        // Se a API sinalizou que o jogo está em andamento (prorrogação, pênaltis, etc.),
-        // NÃO finalizar — aguardar sync-scores atualizar com status terminal
-        if (match.matchStatus && IN_PROGRESS_STATUSES.has(match.matchStatus)) return match;
-        if (Date.now() - new Date(match.date).getTime() >= FINISH_AFTER_MS) {
-          changed = true;
-          return { ...match, finished: true };
-        }
-        return match;
-      });
-
-      if (changed) {
-        await updateDoc(doc(db, 'rounds', roundId), { matches: updatedMatches });
-        logs.push(`Matches auto-finalizados na ${round.name || roundDoc.id}.`);
-      }
-    }
-
-    // ─── Step 5: AUTO-FINALIZAÇÃO DE RODADAS ─────────────────────────────────
-    // Rodadas 'closed', não ainda finalizadas, onde TODOS os matches estão encerrados:
-    // → calcular ranking → enviar resultado ao grupo (texto + PDF) → status 'finished'
-    // Reler o snapshot atualizado para capturar matches recém-marcados no Step 4.
-    const roundsSnap2 = await getDocs(collection(db, 'rounds'));
-
-    for (const roundDoc of roundsSnap2.docs) {
-      const round = roundDoc.data();
-      const roundId = roundDoc.id;
-
-      if (round.status !== 'closed') continue;
-      if (round.resultadoCalculado) continue;       // já processado
-      if (!round.matches?.length) continue;
-
-      // Verificar se TODOS os jogos estão efetivamente encerrados
-      const allDone = round.matches.every(isEffectivelyFinished);
-      if (!allDone) continue;
-
-      const roundName = round.name || `Rodada ${round.number}`;
-      logs.push(`${roundName}: todos os jogos encerrados — finalizando...`);
-
-      // Idempotency: gravar flag ANTES de qualquer operação pesada
-      await updateDoc(doc(db, 'rounds', roundId), { resultadoCalculado: true });
-
-      // Calcular ranking com scoring correto (3pts/1pt, apenas cartelas pagas)
-      const ranking = await calcRoundRanking(roundId, round.matches);
-
-      // Buscar próxima rodada (upcoming ou open, número maior)
-      const nextRound = allRounds
-        .filter(r => (r.status === 'upcoming' || r.status === 'open') && (r.number || 0) > (round.number || 0))
-        .sort((a, b) => (a.number || 0) - (b.number || 0))[0];
-
-      // Link para o ranking da app (fallback se PDF falhar)
-      const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
-      const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
-
-      // Montar mensagem de resultado
-      const winner = ranking[0];
-      const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-      let resultMsg = `🏆 *BOLÃO BRASILEIRÃO — ${roundName} ENCERRADA!*\n\n`;
-
-      if (winner) {
-        resultMsg += `🥇 *Parabéns ao campeão: ${winner.name} _(${winner.cartelaCode})_!*\n`;
-        resultMsg += `🎯 ${winner.points} pontos\n\n`;
-      }
-
-      if (ranking.length > 0) {
-        resultMsg += `📊 *Top 5:*\n`;
-        ranking.slice(0, 5).forEach((r, i) => {
-          resultMsg += `${medals[i] || `${i + 1}.`} ${r.name} (${r.cartelaCode}) — ${r.points} pts\n`;
-        });
-      }
-
-      resultMsg += `\n🙏 Obrigado a todos que participaram desta rodada!`;
-
-      if (nextRound) {
-        const nextMatches = (nextRound.matches || []).sort((a, b) => new Date(a.date) - new Date(b.date));
-        const nextFirst = nextMatches[0];
-        const nextDateStr = nextFirst?.date
-          ? new Date(nextFirst.date).toLocaleDateString('pt-BR', {
-              weekday: 'long', day: '2-digit', month: '2-digit',
-              timeZone: 'America/Sao_Paulo'
-            })
-          : null;
-        resultMsg += `\n\n📢 *Próxima: ${nextRound.name}*`;
-        if (nextDateStr) resultMsg += ` — começa ${nextDateStr}`;
-        resultMsg += `\nFique ligado e faça seus palpites! ⚽`;
-      }
-
-      if (rankingLink) resultMsg += `\n\n📋 *Ranking completo:*\n${rankingLink}`;
-
-      // Gerar e enviar PDF; verificar retorno e logar falha sem bloquear
-      const target = GROUP_JID || ADMIN_PHONE;
-      if (target) {
-        const pdfBase64 = await generateRankingPdf(roundName, ranking);
-        if (pdfBase64) {
-          const pdfOk = await sendWhatsAppDocument(
-            target,
-            pdfBase64,
-            `resultado-${round.number || roundId}.pdf`,
-            `📊 Resultado completo — ${roundName}`,
-            settings
-          );
-          if (pdfOk) {
-            logs.push(`PDF do resultado da ${roundName} enviado ${GROUP_JID ? 'ao grupo' : 'ao admin'}.`);
-          } else {
-            logs.push(`[AVISO] PDF da ${roundName} não foi entregue — link incluído na mensagem como fallback.`);
-          }
-        } else {
-          logs.push(`[AVISO] PDF da ${roundName} não pôde ser gerado — link incluído na mensagem.`);
-        }
-        await sendWhatsApp(target, resultMsg, settings);
-        logs.push(`Mensagem de resultado da ${roundName} enviada.`);
-      }
-
-      // Marcar rodada como finalizada
-      await updateDoc(doc(db, 'rounds', roundId), {
-        status: 'finished',
-        resultSentToGroup: !!GROUP_JID,
-        ranking,
-        finishedAt: serverTimestamp()
-      });
-
-      logs.push(`${roundName} marcada como finalizada automaticamente.`);
     }
 
     return res.status(200).json({ success: true, executedAt: now.toISOString(), logs });

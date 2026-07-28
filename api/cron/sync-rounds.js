@@ -1,7 +1,7 @@
 import { db } from '../_shared/firebase.js';
 import { getRoundFixtures, normalizeName } from '../services/footballApi.js';
 import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
-import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
+import { listTenants } from '../_shared/tenant.js';
 
 const TOTAL_ROUNDS = 38;
 
@@ -28,19 +28,23 @@ export default async function handler(req, res) {
   const logs = [];
 
   try {
-    // Carregar times do Firestore para resolver IDs
+    // Carregar times do Firestore para resolver IDs (catálogo global)
     const teamsSnap = await getDocs(collection(db, 'teams'));
     const teamsMap = {}; // normalizedName → id
     teamsSnap.docs.forEach(d => {
       teamsMap[d.data().normalizedName] = d.id;
     });
 
-    // Carregar rodadas existentes
+    // Rodadas existentes agrupadas por tenant: byTenant[tid][numero] = rodada
+    const tenants = await listTenants();
     const roundsSnap = await getDocs(collection(db, 'rounds'));
-    const existingByNumber = {};
+    const byTenant = {};
     roundsSnap.docs.forEach(d => {
-      const n = d.data().apiRoundNumber || d.data().number;
-      if (n) existingByNumber[n] = { id: d.id, ...d.data() };
+      const data = d.data();
+      const n = data.apiRoundNumber || data.number;
+      if (!n || !data.tenantId) return;
+      if (!byTenant[data.tenantId]) byTenant[data.tenantId] = {};
+      byTenant[data.tenantId][n] = { id: d.id, ...data };
     });
 
     const roundsToSync = forceRound ? [forceRound] : Array.from({ length: TOTAL_ROUNDS }, (_, i) => i + 1);
@@ -48,6 +52,7 @@ export default async function handler(req, res) {
 
     for (const roundNum of roundsToSync) {
       try {
+        // Uma única busca na API por rodada; o upsert replica para cada tenant
         const fixtures = await getRoundFixtures(roundNum);
         if (!fixtures.length) continue;
 
@@ -91,41 +96,44 @@ export default async function handler(req, res) {
           return 'upcoming';
         })();
 
-        if (existingByNumber[roundNum]) {
-          // Atualiza apenas se a rodada ainda não foi finalizada
-          const existing = existingByNumber[roundNum];
-          if (['upcoming', 'open'].includes(existing.status)) {
-            // Aplica smartStatus se a rodada está 'upcoming' mas deveria estar 'open' ou 'closed'
-            const statusUpdate = existing.status === 'upcoming' && smartStatus !== 'upcoming'
-              ? { status: smartStatus, notificacaoAberturaEnviada: smartStatus !== 'upcoming', alertaFaltando1hEnviado: smartStatus === 'closed' }
-              : {};
-            await updateDoc(doc(db, 'rounds', existing.id), {
+        for (const tenant of tenants) {
+          const existing = byTenant[tenant.id]?.[roundNum];
+          if (existing) {
+            // Atualiza apenas se a rodada ainda não foi finalizada
+            if (['upcoming', 'open'].includes(existing.status)) {
+              // Aplica smartStatus se a rodada está 'upcoming' mas deveria estar 'open' ou 'closed'
+              const statusUpdate = existing.status === 'upcoming' && smartStatus !== 'upcoming'
+                ? { status: smartStatus, notificacaoAberturaEnviada: smartStatus !== 'upcoming', alertaFaltando1hEnviado: smartStatus === 'closed' }
+                : {};
+              await updateDoc(doc(db, 'rounds', existing.id), {
+                matches,
+                closeAt,
+                autoSyncedAt: serverTimestamp(),
+                ...statusUpdate
+              });
+              updated++;
+              logs.push(`[${tenant.id}] Rodada ${roundNum} atualizada`);
+            }
+          } else {
+            await addDoc(collection(db, 'rounds'), {
+              tenantId: tenant.id,
+              number: roundNum,
+              apiRoundNumber: roundNum,
+              name: `Rodada ${roundNum}`,
+              status: smartStatus,
               matches,
               closeAt,
+              notificacaoAberturaEnviada: smartStatus !== 'upcoming',
+              alertaFaltando1hEnviado: smartStatus === 'closed',
+              notificacaoFechamentoEnviada: smartStatus === 'closed',
+              resultadoCalculado: false,
+              resultSentToGroup: false,
               autoSyncedAt: serverTimestamp(),
-              ...statusUpdate
+              createdAt: serverTimestamp()
             });
-            updated++;
-            logs.push(`Rodada ${roundNum} atualizada`);
+            created++;
+            logs.push(`[${tenant.id}] Rodada ${roundNum} criada com status "${smartStatus}" (${matches.length} jogos)`);
           }
-        } else {
-          await addDoc(collection(db, 'rounds'), {
-            tenantId: DEFAULT_TENANT_ID,
-            number: roundNum,
-            apiRoundNumber: roundNum,
-            name: `Rodada ${roundNum}`,
-            status: smartStatus,
-            matches,
-            closeAt,
-            notificacaoAberturaEnviada: smartStatus !== 'upcoming',
-            alertaFaltando1hEnviado: smartStatus === 'closed',
-            resultadoCalculado: false,
-            resultSentToGroup: false,
-            autoSyncedAt: serverTimestamp(),
-            createdAt: serverTimestamp()
-          });
-          created++;
-          logs.push(`Rodada ${roundNum} criada com status "${smartStatus}" (${matches.length} jogos)`);
         }
 
         // Pausa para respeitar rate limit do TheSportsDB
@@ -136,7 +144,7 @@ export default async function handler(req, res) {
       }
     }
 
-    logs.push(`Resumo: Criadas=${created} | Atualizadas=${updated} | Erros=${errors}`);
+    logs.push(`Resumo: Tenants=${tenants.length} | Criadas=${created} | Atualizadas=${updated} | Erros=${errors}`);
     return res.status(200).json({ success: true, logs });
   } catch (err) {
     console.error('sync-rounds error:', err);
