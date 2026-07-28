@@ -4,7 +4,7 @@ import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc,
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
-import { SERIE_A_2026_TEAMS, TENANT_ID } from './constants.js';
+import { SERIE_A_2026_TEAMS } from './constants.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
@@ -451,7 +451,7 @@ const UserEditModal = ({ user, onSave, onCancel }) => {
 };
 
 const AdminPanel = ({ setView }) => {
-  const { currentUser, setCurrentUser, logout, teams, rounds, users, predictions, establishments, settings, communications, addRound, updateRound, deleteRound, addTeam, updateTeam, deleteTeam, updateUser, deleteUser, resetTeamsToSerieA2026, updatePrediction, updateSettings, addEstablishment, updateEstablishment, deleteEstablishment, addCommunication, updateCommunication, teamImportRequests, submitImportRequestsFromApi, approveImportRequest, rejectImportRequest } = useApp();
+  const { currentUser, setCurrentUser, logout, teams, rounds, users, predictions, establishments, settings, communications, tenantId, addRound, updateRound, deleteRound, addTeam, updateTeam, deleteTeam, updateUser, deleteUser, resetTeamsToSerieA2026, updatePrediction, updateSettings, addEstablishment, updateEstablishment, deleteEstablishment, addCommunication, updateCommunication, teamImportRequests, submitImportRequestsFromApi, approveImportRequest, rejectImportRequest } = useApp();
   
   console.log('AdminPanel - Settings:', settings);
   
@@ -1533,10 +1533,10 @@ const AdminPanel = ({ setView }) => {
       };
 
       // Buscar o documento de settings
-      const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)));
+      const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', tenantId)));
       let settingsId = null;
       if (settingsSnapshot.empty) {
-        const docRef = await addDoc(collection(db, 'settings'), { ...dataToSave, tenantId: TENANT_ID, createdAt: serverTimestamp() });
+        const docRef = await addDoc(collection(db, 'settings'), { ...dataToSave, tenantId, createdAt: serverTimestamp() });
         settingsId = docRef.id;
       } else {
         settingsId = settingsSnapshot.docs[0].id;
@@ -2506,7 +2506,7 @@ const AdminPanel = ({ setView }) => {
       }
 
       // Buscar rodadas para saber quais times estão vinculados
-      const roundsSnap = await getDocs(query(collection(db, 'rounds'), where('tenantId', '==', TENANT_ID)));
+      const roundsSnap = await getDocs(query(collection(db, 'rounds'), where('tenantId', '==', tenantId)));
       const linkedTeamIds = new Set();
       for (const rd of roundsSnap.docs) {
         const matches = Array.isArray(rd.data().matches) ? rd.data().matches : [];
@@ -2609,7 +2609,7 @@ const AdminPanel = ({ setView }) => {
       }
 
       // Conta palpites por usuário para priorizar
-      const predsSnap = await getDocs(query(collection(db, 'predictions'), where('tenantId', '==', TENANT_ID)));
+      const predsSnap = await getDocs(query(collection(db, 'predictions'), where('tenantId', '==', tenantId)));
       const userPredCount = {};
       predsSnap.docs.forEach(p => {
         const uid = p.data().userId;

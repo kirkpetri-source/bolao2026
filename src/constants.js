@@ -1,9 +1,5 @@
 // Constantes estáticas do domínio (dados que não mudam em runtime).
-
-// Tenant atual (Fase 2 do SaaS). Hoje fixo no tenant padrão; quando o onboarding
-// de novos bolões entrar, passa a ser resolvido dinamicamente (subdomínio/slug).
-// Mantém em sincronia com api/_shared/tenant.js (backend).
-export const TENANT_ID = 'bolao-lion-tech';
+// O tenant atual é resolvido dinamicamente — ver src/tenant.js.
 
 // Times da Série A 2026 — usado no seed inicial e no reset de times.
 export const SERIE_A_2026_TEAMS = [

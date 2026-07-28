@@ -2,14 +2,13 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import { db } from './firebase.js';
-import { TENANT_ID } from './constants.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { changeMyPassword, authErrorMessage } from './authService.js';
 
 const UserPanel = ({ setView }) => {
-  const { currentUser, setCurrentUser, logout, teams, rounds, predictions, users, establishments, addPrediction, settings, deleteCartelaPredictions, updateUser } = useApp();
+  const { currentUser, setCurrentUser, logout, teams, rounds, predictions, users, establishments, addPrediction, settings, deleteCartelaPredictions, updateUser, tenantId } = useApp();
   const [activeTab, setActiveTab] = useState('predictions');
   const [selectedRound, setSelectedRound] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -1208,7 +1207,7 @@ const UserPanel = ({ setView }) => {
       
       // Enviar confirmação via WhatsApp automático (Evolution API, server-side)
       try {
-        const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)));
+        const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', tenantId)));
         const valorRodada = (settings?.betValue ?? 15).toFixed(2).replace('.', ',');
         let messageTemplate = `🏆 *BOLÃO BRASILEIRÃO 2026*\n\n📋 *{RODADA}*\n🎫 *Cartela: {CARTELA}*\n✅ Palpites registrados!\n\n{PALPITES}\n\n💰 *Valor: R$ {VALOR}*\n\n👉 Para ativar seus palpites, clique em *Efetuar Pagamento* na tela da rodada.\n\nBoa sorte! 🍀`;
         let evolutionCfg = null;

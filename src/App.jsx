@@ -4,8 +4,10 @@ import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc,
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
-import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
-import { SERIE_A_2026_TEAMS, TENANT_ID } from './constants.js';
+import { db, pickPublicConfig } from './firebase.js';
+import { SERIE_A_2026_TEAMS } from './constants.js';
+import { resolveTenantId, rememberTenant, publicConfigDocId } from './tenant.js';
+import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
@@ -14,11 +16,11 @@ import AdminPanel from './AdminPanel.jsx';
 import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
 
 
-const initializeDatabase = async () => {
+const initializeDatabase = async (tenantId) => {
   try {
     const usersSnapshot = await getDocs(collection(db, 'users'));
     const teamsSnapshot = await getDocs(collection(db, 'teams'));
-    const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)));
+    const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', tenantId)));
     
     // Se já há dados, não reinicializa
     if (!usersSnapshot.empty && !teamsSnapshot.empty) {
@@ -59,7 +61,7 @@ const initializeDatabase = async () => {
 
     if (settingsSnapshot.empty) {
       await addDoc(collection(db, 'settings'), {
-        tenantId: TENANT_ID,
+        tenantId,
         whatsappMessage: '🏆 *BOLÃO BRASILEIRÃO 2026*\n\n📋 *{RODADA}*\n🎫 *Cartela: {CARTELA}*\n✅ Confirmado!\n\n{PALPITES}\n\n🏦 Pagamento via PIX\n🔑 Chave: {PIX}\n👤 Destinatário: {DESTINATARIO}\n\n💰 R$ 15,00\n⚠️ *Não pode alterar após pagamento*\n\nBoa sorte! 🍀',
         chargeMessageTemplate: 'Olá {NOME},\n\nIdentificamos que o pagamento da sua cartela da {RODADA} ainda está pendente.\n\nValor: R$ {VALOR}\nCartela: {CARTELA}\n\nPor favor, conclua o pagamento para validar sua participação no ranking e na premiação. Obrigado! 🙏',
         devolution: {
@@ -146,6 +148,9 @@ const sendWhatsAppMessage = (userPhone, roundName, predictions, teams, messageTe
 };
 
 const AppProvider = ({ children }) => {
+  // Tenant atual: link de convite (?t=) > último usado > padrão. Após o login,
+  // pode trocar para o lastTenantId do usuário (ver observer de Auth abaixo).
+  const [tenantId, setTenantId] = useState(() => resolveTenantId());
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -193,11 +198,11 @@ const AppProvider = ({ children }) => {
   // (usados no formulário de cadastro, antes do login).
   useEffect(() => {
     setLoading(false);
-    const unsub = onSnapshot(query(collection(db, 'establishments'), where('tenantId', '==', TENANT_ID)),
+    const unsub = onSnapshot(query(collection(db, 'establishments'), where('tenantId', '==', tenantId)),
       s => setEstablishments(s.docs.map(d => ({ id: d.id, ...d.data() }))),
       err => console.error('establishments:', err));
     return () => unsub();
-  }, []);
+  }, [tenantId]);
 
   // Dados protegidos: só após autenticação. Re-assina ao trocar de usuário e
   // limpa ao deslogar. Coleções de admin só são assinadas por admin.
@@ -208,9 +213,9 @@ const AppProvider = ({ children }) => {
       return;
     }
     const isAdminUser = !!currentUser.isAdmin;
-    if (isAdminUser) { initializeDatabase().catch(err => console.error('initDb:', err)); }
+    if (isAdminUser) { initializeDatabase(tenantId).catch(err => console.error('initDb:', err)); }
 
-    const byTenant = (col) => query(collection(db, col), where('tenantId', '==', TENANT_ID));
+    const byTenant = (col) => query(collection(db, col), where('tenantId', '==', tenantId));
     const uns = [
       onSnapshot(byTenant('rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('rounds:', err)),
       onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), err => console.error('teams:', err)),
@@ -220,11 +225,16 @@ const AppProvider = ({ children }) => {
     if (isAdminUser) {
       uns.push(
         onSnapshot(byTenant('communications'), s => setCommunications(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('communications:', err)),
+      );
+    }
+    // Importação de times é recurso global da plataforma (só admin global).
+    if (currentUser.globalAdmin) {
+      uns.push(
         onSnapshot(collection(db, 'team_import_requests'), s => setTeamImportRequests(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('import_requests:', err)),
       );
     }
     return () => uns.forEach(u => u());
-  }, [currentUser?.id, currentUser?.isAdmin]);
+  }, [currentUser?.id, currentUser?.isAdmin, tenantId]);
 
   // Configurações baseadas no papel: admin lê /settings completo (com segredos);
   // usuário comum lê apenas /public_config/main (sem segredos). Ao carregar o
@@ -233,23 +243,24 @@ const AppProvider = ({ children }) => {
     const isAdmin = !!currentUser?.isAdmin;
     let unsub;
     if (isAdmin) {
-      unsub = onSnapshot(query(collection(db, 'settings'), where('tenantId', '==', TENANT_ID)), s => {
+      unsub = onSnapshot(query(collection(db, 'settings'), where('tenantId', '==', tenantId)), s => {
         const full = s.docs.length > 0 ? { id: s.docs[0].id, ...s.docs[0].data() } : null;
         setSettings(full);
         if (full) {
-          setDoc(doc(db, 'public_config', PUBLIC_CONFIG_ID), { ...pickPublicConfig(full), tenantId: TENANT_ID }, { merge: true })
+          setDoc(doc(db, 'public_config', publicConfigDocId(tenantId)), { ...pickPublicConfig(full), tenantId }, { merge: true })
             .catch(err => console.error('sync public_config:', err));
         }
       });
     } else {
-      unsub = onSnapshot(doc(db, 'public_config', PUBLIC_CONFIG_ID), snap => {
+      unsub = onSnapshot(doc(db, 'public_config', publicConfigDocId(tenantId)), snap => {
         setSettings(snap.exists() ? { id: snap.id, ...snap.data() } : null);
       });
     }
     return () => { if (unsub) unsub(); };
-  }, [currentUser?.isAdmin]);
+  }, [currentUser?.isAdmin, tenantId]);
 
   // Observa o estado do Firebase Auth e sincroniza currentUser com o doc /users/{uid}.
+  // Também resolve o tenant do usuário e o papel dele nele (owner ⇒ painel admin).
   useEffect(() => {
     const unsub = observeAuth(async (fbUser) => {
       if (!fbUser) { setCurrentUser(null); return; }
@@ -258,7 +269,26 @@ const AppProvider = ({ children }) => {
         const tok = await fbUser.getIdTokenResult();
         if (snap.exists()) {
           const data = snap.data();
-          setCurrentUser({ id: fbUser.uid, ...data, isAdmin: tok.claims.admin === true || !!data.isAdmin });
+          // Link de convite (?t=) tem prioridade; senão, o tenant onde o usuário
+          // se cadastrou/usou por último; senão, o que já está resolvido.
+          let hasUrlTenant = false;
+          try { hasUrlTenant = !!new URL(window.location.href).searchParams.get('t'); } catch {}
+          const tid = (!hasUrlTenant && data.lastTenantId) ? data.lastTenantId : tenantId;
+          if (tid !== tenantId) { setTenantId(tid); rememberTenant(tid); }
+
+          let role = null;
+          try {
+            const mem = await getDoc(doc(db, 'tenants', tid, 'members', fbUser.uid));
+            role = mem.exists() ? mem.data().role : null;
+          } catch (e) { console.warn('membership:', e); }
+
+          const globalAdmin = tok.claims.admin === true || !!data.isAdmin;
+          setCurrentUser({
+            id: fbUser.uid, ...data,
+            isAdmin: globalAdmin || role === 'owner',
+            globalAdmin,
+            tenantRole: role,
+          });
         } else {
           // Autenticado sem cadastro no Firestore: encerra a sessão.
           setCurrentUser(null);
@@ -269,7 +299,7 @@ const AppProvider = ({ children }) => {
       }
     });
     return () => unsub();
-  }, []);
+  }, [tenantId]);
 
   // Impõe expiração por inatividade (10 min) por cima da sessão do Auth.
   useEffect(() => {
@@ -319,7 +349,7 @@ const AppProvider = ({ children }) => {
 
   const value = {
     currentUser, setCurrentUser, users, teams, rounds, predictions, establishments, settings, communications, teamImportRequests, loading,
-    login, logout, darkMode, toggleDark,
+    tenantId, login, logout, darkMode, toggleDark,
     addUser: async (d) => {
       const normalizeWhatsapp = (s) => {
         const str = (s || '').replace(/\D/g, '');
@@ -344,6 +374,7 @@ const AppProvider = ({ children }) => {
         whatsapp: phone,
         isAdmin: !!d.isAdmin,
         balance: d.balance || 0,
+        lastTenantId: tenantId,
       };
 
       if (currentUser?.isAdmin) {
@@ -351,7 +382,7 @@ const AppProvider = ({ children }) => {
         // sessão) e grava /users + vínculo de membro do tenant como admin/owner.
         const uid = await adminCreateUser({ whatsapp: phone, password: d.password });
         await setDoc(doc(db, 'users', uid), { ...toSave, createdAt: serverTimestamp() });
-        await setDoc(doc(db, 'tenants', TENANT_ID, 'members', uid), {
+        await setDoc(doc(db, 'tenants', tenantId, 'members', uid), {
           role: toSave.isAdmin ? 'owner' : 'participant',
           name: toSave.name || '',
           createdAt: serverTimestamp(),
@@ -366,7 +397,7 @@ const AppProvider = ({ children }) => {
         whatsapp: phone,
         password: d.password,
         userDoc: { ...toSave, isAdmin: false },
-        tenantId: TENANT_ID,
+        tenantId,
       });
       return { id: uid, ...toSave };
     },
@@ -390,7 +421,7 @@ const AppProvider = ({ children }) => {
     },
     deleteUser: async (id) => {
       requireAdmin();
-      try { await deleteDoc(doc(db, 'tenants', TENANT_ID, 'members', id)); } catch (e) { console.warn('remover membro:', e); }
+      try { await deleteDoc(doc(db, 'tenants', tenantId, 'members', id)); } catch (e) { console.warn('remover membro:', e); }
       return await deleteDoc(doc(db, 'users', id));
     },
     addTeam: async (d) => { 
@@ -478,7 +509,7 @@ const AppProvider = ({ children }) => {
       await updateDoc(doc(db, 'team_import_requests', id), { status: 'rejected', rejectedAt: serverTimestamp(), reason: reason || '' });
       await addDoc(collection(db, 'audit_logs'), { type: 'team_import_rejected', requestId: id, actorId: currentUser?.id || null, reason: reason || '', at: serverTimestamp() });
     },
-    addRound: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'rounds'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addRound: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'rounds'), { ...d, tenantId, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateRound: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'rounds', id), d); },
     deleteRound: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'rounds', id)); },
     addPrediction: async (d) => { 
@@ -486,7 +517,7 @@ const AppProvider = ({ children }) => {
       if (currentUser.id !== d.userId && !currentUser.isAdmin) throw new Error('Não autorizado');
       const r = await addDoc(collection(db, 'predictions'), {
         ...d,
-        tenantId: TENANT_ID,
+        tenantId,
         paid: false,
         cartelaCode: d.cartelaCode || generateCartelaCode(),
         createdAt: serverTimestamp()
@@ -517,7 +548,7 @@ const AppProvider = ({ children }) => {
         throw err;
       }
     },
-    addEstablishment: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'establishments'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addEstablishment: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'establishments'), { ...d, tenantId, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateEstablishment: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'establishments', id), d); },
     deleteEstablishment: async (id) => { requireAdmin(); return await deleteDoc(doc(db, 'establishments', id)); },
     updateSettings: async (d) => {
@@ -531,7 +562,7 @@ const AppProvider = ({ children }) => {
         throw new Error('Configurações não inicializadas');
       }
     },
-    addCommunication: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'communications'), { ...d, tenantId: TENANT_ID, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
+    addCommunication: async (d) => { requireAdmin(); const r = await addDoc(collection(db, 'communications'), { ...d, tenantId, createdAt: serverTimestamp() }); return { id: r.id, ...d }; },
     updateCommunication: async (id, d) => { requireAdmin(); return await updateDoc(doc(db, 'communications', id), d); }
   };
 
@@ -779,6 +810,9 @@ const LoginScreen = ({ setView }) => {
               <button onClick={() => setShowRulesModal(true)} className="v2-btn-ghost w-full py-2.5 text-sm">
                 <FileText size={16} /> Ver Regras
               </button>
+              <button onClick={() => setView('onboard')} className="v2-btn-ghost w-full py-2.5 text-sm">
+                <Trophy size={16} /> Quero criar meu próprio bolão
+              </button>
             </div>
           </div>
         </div>
@@ -958,6 +992,7 @@ function App() {
     );
   }
 
+  if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
   if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
   // Gating global: se manutenção estiver ativa, usuários logados não-admin são direcionados à tela de manutenção
   if (settings?.maintenanceMode && (currentUser && !currentUser.isAdmin)) {
