@@ -421,8 +421,17 @@ const AppProvider = ({ children }) => {
     },
     deleteUser: async (id) => {
       requireAdmin();
-      try { await deleteDoc(doc(db, 'tenants', tenantId, 'members', id)); } catch (e) { console.warn('remover membro:', e); }
-      return await deleteDoc(doc(db, 'users', id));
+      // Exclusão completa via backend (Admin SDK): membro + doc + conta no Auth.
+      // Sem isso a conta ficava órfã no Auth e o WhatsApp travava como "já cadastrado".
+      const idToken = await getIdToken();
+      const res = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, targetUserId: id, tenantId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Falha ao excluir usuário');
+      return data;
     },
     addTeam: async (d) => { 
       requireAdmin(); 
