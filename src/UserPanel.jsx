@@ -6,12 +6,31 @@ import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { changeMyPassword, authErrorMessage } from './authService.js';
+import { isBlocked } from '../api/_shared/subscription.js';
 
 const UserPanel = ({ setView }) => {
   const { currentUser, setCurrentUser, logout, teams, rounds, predictions, users, establishments, addPrediction, settings, deleteCartelaPredictions, updateUser, tenantId } = useApp();
   const [activeTab, setActiveTab] = useState('predictions');
 
   const nomeDoBolao = (settings?.brandName || '').trim() || 'Bolão';
+
+  // Situação da assinatura do bolão. O participante não tem nada a ver com a
+  // mensalidade do organizador — mas precisa saber que não adianta palpitar.
+  const [bolaoBloqueado, setBolaoBloqueado] = useState(false);
+  const [mostrarIndisponivel, setMostrarIndisponivel] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'tenants', tenantId));
+        if (vivo && snap.exists()) setBolaoBloqueado(isBlocked(snap.data().subscription));
+      } catch { /* sem acesso: segue liberado e a regra do banco decide */ }
+    })();
+    return () => { vivo = false; };
+  }, [tenantId]);
+
+  // WhatsApp do organizador, para o participante falar com quem pode resolver.
+  const contatoDoOrganizador = (users.find(u => u.isAdmin)?.whatsapp || '').replace(/\D/g, '');
 
   // Confirmação de entrada. Com vários bolões na mesma plataforma, um link
   // errado levava a pessoa a se cadastrar e palpitar no bolão de outra sem
@@ -194,6 +213,13 @@ const UserPanel = ({ setView }) => {
   };
 
   const handleStartPrediction = (round) => {
+    // Barra ANTES de abrir o formulário. Antes o participante montava a cartela
+    // inteira e só levava a recusa no "confirmar" — trabalho perdido e a
+    // impressão de que o erro foi dele.
+    if (bolaoBloqueado) {
+      setMostrarIndisponivel(true);
+      return;
+    }
     // Bloqueio automático por fechamento programado
     if (isRoundTimedClosed(round)) {
       alert('Rodada fechada para palpites pelo cronograma definido.');
@@ -1498,6 +1524,38 @@ const UserPanel = ({ setView }) => {
   return (
     <div className="min-h-screen page-bg font-body">
 
+      {/* Palpites indisponíveis. A mensagem não cita mensalidade nem dívida: o
+          problema é entre o organizador e a plataforma, e expor isso ao
+          participante constrangeria quem não tem nada a ver com a cobrança. */}
+      {mostrarIndisponivel && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-modal animate-slide-up p-7 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-ouro-50 flex items-center justify-center mx-auto mb-4">
+              <Clock size={26} className="text-ouro-600" />
+            </div>
+            <h3 className="font-display text-xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>
+              PALPITES INDISPONÍVEIS
+            </h3>
+            <p className="text-sm text-noite-500 leading-relaxed mb-5">
+              O <strong>{nomeDoBolao}</strong> não está recebendo palpites no momento.
+              Fale com o organizador para saber quando volta.
+            </p>
+            {contatoDoOrganizador && (
+              <a
+                href={`https://wa.me/${contatoDoOrganizador.startsWith('55') ? contatoDoOrganizador : '55' + contatoDoOrganizador}`}
+                target="_blank" rel="noopener noreferrer"
+                className="v2-btn-primary w-full py-3 text-sm mb-3">
+                <Send size={16} /> Falar com o organizador
+              </a>
+            )}
+            <button onClick={() => setMostrarIndisponivel(false)}
+              className="text-sm text-noite-400 hover:text-noite-700">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Scoreboard header ── */}
       <div className="bg-campo-700 dark:bg-noite-900 transition-colors duration-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
@@ -1590,6 +1648,28 @@ const UserPanel = ({ setView }) => {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        {activeTab === 'predictions' && bolaoBloqueado && (
+          <div className="rounded-xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 p-4 mb-5 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+            <div className="flex items-start gap-3">
+              <Clock size={20} className="text-ouro-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-noite-900">Palpites indisponíveis no momento</p>
+                <p className="text-sm text-noite-600">
+                  O {nomeDoBolao} não está recebendo palpites. Fale com o organizador.
+                </p>
+              </div>
+            </div>
+            {contatoDoOrganizador && (
+              <a
+                href={`https://wa.me/${contatoDoOrganizador.startsWith('55') ? contatoDoOrganizador : '55' + contatoDoOrganizador}`}
+                target="_blank" rel="noopener noreferrer"
+                className="v2-btn-primary px-4 py-2.5 text-sm justify-center flex-shrink-0">
+                <Send size={15} /> Falar com o organizador
+              </a>
+            )}
+          </div>
+        )}
+
         {activeTab === 'predictions' && (
           <div className="space-y-10">
 
