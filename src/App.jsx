@@ -6,7 +6,7 @@ import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { db, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
-import { resolveTenantId, rememberTenant, publicConfigDocId, DEFAULT_TENANT_ID } from './tenant.js';
+import { resolveTenantId, rememberTenant, publicConfigDocId, DEFAULT_TENANT_ID, sincronizarUrlComTenant } from './tenant.js';
 import NovaVersao from './components/NovaVersao.jsx';
 import Plataforma from './Plataforma.jsx';
 import Entrada from './Entrada.jsx';
@@ -158,6 +158,10 @@ const AppProvider = ({ children }) => {
   // Endereço de bolão que não existe: melhor dizer isso do que mostrar uma
   // tela vazia que parece defeito do sistema.
   const [bolaoInexistente, setBolaoInexistente] = useState(false);
+
+  // O endereço sempre mostra o bolão aberto — inclusive quando ele veio do
+  // histórico do navegador ou do cadastro do usuário, e não da URL.
+  useEffect(() => { sincronizarUrlComTenant(tenantId); }, [tenantId]);
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);            // usuários globais (identidade)
   const [tenantMembers, setTenantMembers] = useState([]); // membros do tenant atual

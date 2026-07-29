@@ -79,3 +79,21 @@ export function inviteMessage(nomeDoBolao, url) {
     + `${url}\n\n`
     + `Boa sorte! ⚽`;
 }
+
+// Mantém a barra de endereço mostrando o bolão aberto.
+//
+// Sem isto, quem já tinha visitado um bolão abria a raiz e caía nele com a URL
+// exibindo só "/" — o mesmo problema de origem: a pessoa não sabe em qual
+// bolão está, e não tem como mandar o link certo para um amigo.
+export function sincronizarUrlComTenant(tid) {
+  if (!tid) return;
+  try {
+    const atual = window.location.pathname;
+    const partes = atual.split('/').filter(Boolean);
+    // Não mexe em rotas do site (/plataforma, /ranking/123).
+    if (partes.length > 1) return;
+    if (partes.length === 1 && CAMINHOS_RESERVADOS.has(partes[0].toLowerCase())) return;
+    if (partes[0] === tid) return;
+    window.history.replaceState({}, '', `/${tid}${window.location.search || ''}`);
+  } catch { /* navegador sem history: só não sincroniza */ }
+}
