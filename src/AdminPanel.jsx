@@ -11,6 +11,7 @@ import GuidedTour from './components/GuidedTour.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
+import { inviteUrl, inviteMessage } from './tenant.js';
 import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
 
 // Liga/desliga o débito automático da mensalidade. Fica nas Configurações
@@ -107,6 +108,205 @@ const RecorrenciaCard = () => {
 // Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
 // e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
 // isto aqui é o aviso e o caminho para pagar.
+// Convite do bolão: link pronto e mensagem pronta. É o último passo antes de o
+// bolão ganhar vida, então precisa estar a um clique — não escondido numa aba.
+const ConviteCard = () => {
+  const { tenantId, settings } = useApp();
+  const [copiado, setCopiado] = useState('');
+
+  const nome = settings?.brandName || 'Nosso bolão';
+  const url = inviteUrl(tenantId);
+  const mensagem = inviteMessage(nome, url);
+
+  const copiar = async (texto, qual) => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(qual);
+      setTimeout(() => setCopiado(''), 2000);
+    } catch { /* sem clipboard: o texto está visível para copiar à mão */ }
+  };
+
+  return (
+    <div data-tour="convite" className="bg-white rounded-xl shadow-sm border p-6">
+      <h3 className="text-lg font-bold mb-2">Convide seus participantes</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Quem abrir este link cai direto no cadastro do <strong>seu</strong> bolão.
+      </p>
+
+      <label className="v2-label">Link do seu bolão</label>
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
+        <input type="text" readOnly value={url} onFocus={(e) => e.target.select()}
+          className="v2-input flex-1 font-mono text-xs" />
+        <button onClick={() => copiar(url, 'link')} className="v2-btn-outline px-4 py-2.5 text-sm whitespace-nowrap">
+          <Copy size={15} /> {copiado === 'link' ? 'Copiado!' : 'Copiar link'}
+        </button>
+      </div>
+
+      <label className="v2-label">Mensagem pronta para o grupo</label>
+      <textarea readOnly value={mensagem} rows={7} onFocus={(e) => e.target.select()}
+        className="v2-input w-full text-sm mb-3 resize-none" />
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <a href={`https://wa.me/?text=${encodeURIComponent(mensagem)}`} target="_blank" rel="noopener noreferrer"
+          className="v2-btn-primary px-5 py-2.5 text-sm justify-center">
+          <Send size={16} /> Enviar pelo WhatsApp
+        </a>
+        <button onClick={() => copiar(mensagem, 'msg')} className="v2-btn-outline px-5 py-2.5 text-sm">
+          <Copy size={15} /> {copiado === 'msg' ? 'Copiada!' : 'Copiar mensagem'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Assistente do primeiro acesso. Diferente de um tour que só aponta para os
+// botões, aqui o organizador PREENCHE os dados enquanto avança — ao terminar,
+// o bolão está apto a funcionar e só falta ele mandar o link para os amigos.
+const SetupWizard = ({ aoFechar }) => {
+  const { settings, updateSettings } = useApp();
+  const [passo, setPasso] = useState(0);
+  const [pixKey, setPixKey] = useState(settings?.payment?.pixKey || settings?.pixKey || '');
+  const [recebedor, setRecebedor] = useState(settings?.payment?.pixRecipientName || '');
+  const [valor, setValor] = useState(settings?.betValue ?? 15);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+
+  const salvarCobranca = async () => {
+    if (!String(pixKey).trim()) { setErro('Informe a chave PIX que vai receber as cartelas.'); return; }
+    if (!(Number(valor) > 0)) { setErro('O valor da cartela precisa ser maior que zero.'); return; }
+    setSalvando(true); setErro('');
+    try {
+      // Notação de ponto para não apagar os outros campos de payment
+      // (provider e useEnvCredentials) que já vieram do cadastro.
+      await updateSettings({
+        'payment.pixKey': String(pixKey).trim(),
+        'payment.pixRecipientName': String(recebedor).trim(),
+        betValue: Number(valor),
+      });
+      setPasso(2);
+    } catch (e) {
+      setErro(e.message || 'Não foi possível salvar agora.');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const total = 4;
+  const Cabecalho = ({ titulo, subtitulo }) => (
+    <>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <p className="text-[11px] font-bold uppercase text-campo-600" style={{ letterSpacing: '0.14em' }}>
+          Passo {passo + 1} de {total}
+        </p>
+        <button onClick={aoFechar} aria-label="Fechar" className="text-noite-400 hover:text-noite-700"><X size={18} /></button>
+      </div>
+      <h2 className="font-display text-2xl text-noite-900 mb-1" style={{ letterSpacing: '0.03em' }}>{titulo}</h2>
+      {subtitulo && <p className="text-sm text-noite-500 mb-5">{subtitulo}</p>}
+    </>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/60 overflow-y-auto p-4 flex items-start sm:items-center justify-center">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-auto p-6">
+        {/* Trilha de progresso: mostra o quanto falta, que é o que segura
+            alguém num formulário de configuração. */}
+        <div className="flex gap-1.5 mb-5">
+          {Array.from({ length: total }).map((_, i) => (
+            <div key={i} className={`h-1 flex-1 rounded-full ${i <= passo ? 'bg-campo-600' : 'bg-gray-200'}`} />
+          ))}
+        </div>
+
+        {passo === 0 && (
+          <>
+            <Cabecalho titulo="Vamos deixar seu bolão pronto"
+              subtitulo="Três passos rápidos. Ao final você já sai com o link para chamar a galera." />
+            <ul className="text-sm text-noite-600 space-y-2.5 mb-6">
+              <li><strong>1.</strong> A chave PIX que vai receber as cartelas e quanto custa cada uma.</li>
+              <li><strong>2.</strong> O WhatsApp do bolão, que envia confirmações e cobranças.</li>
+              <li><strong>3.</strong> O convite pronto para mandar no grupo.</li>
+            </ul>
+            <div className="flex justify-between items-center">
+              <button onClick={aoFechar} className="text-xs text-noite-400 hover:text-noite-700">Fazer isso depois</button>
+              <button onClick={() => setPasso(1)} className="v2-btn-primary px-5 py-2.5 text-sm">
+                Começar <ChevronRight size={15} />
+              </button>
+            </div>
+          </>
+        )}
+
+        {passo === 1 && (
+          <>
+            <Cabecalho titulo="Como você vai receber"
+              subtitulo="Sem a chave PIX, os participantes não conseguem pagar a cartela." />
+            <div className="space-y-4">
+              <div>
+                <label className="v2-label">Chave PIX</label>
+                <input type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)}
+                  placeholder="CPF, celular, e-mail ou chave aleatória" className="v2-input" />
+              </div>
+              <div>
+                <label className="v2-label">Nome de quem recebe</label>
+                <input type="text" value={recebedor} onChange={(e) => setRecebedor(e.target.value)}
+                  placeholder="Aparece para o participante conferir" className="v2-input" />
+              </div>
+              <div>
+                <label className="v2-label">Valor da cartela (R$)</label>
+                <input type="number" min="1" step="1" value={valor}
+                  onChange={(e) => setValor(e.target.value)} className="v2-input" />
+              </div>
+            </div>
+            {erro && <p className="text-sm text-red-600 mt-3">{erro}</p>}
+            <div className="flex justify-between items-center mt-6">
+              <button onClick={() => setPasso(0)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
+                <ChevronLeft size={15} /> Voltar
+              </button>
+              <button onClick={salvarCobranca} disabled={salvando} className="v2-btn-primary px-5 py-2.5 text-sm disabled:opacity-60">
+                {salvando ? <Loader2 size={15} className="animate-spin" /> : null}
+                Salvar e continuar <ChevronRight size={15} />
+              </button>
+            </div>
+          </>
+        )}
+
+        {passo === 2 && (
+          <>
+            <Cabecalho titulo="WhatsApp do bolão"
+              subtitulo="Escaneie o QR Code com o celular que vai falar com os participantes." />
+            <WhatsAppConnectCard />
+            <div className="flex justify-between items-center mt-6">
+              <button onClick={() => setPasso(1)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
+                <ChevronLeft size={15} /> Voltar
+              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPasso(3)} className="text-xs text-noite-400 hover:text-noite-700">Conectar depois</button>
+                <button onClick={() => setPasso(3)} className="v2-btn-primary px-5 py-2.5 text-sm">
+                  Continuar <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {passo === 3 && (
+          <>
+            <Cabecalho titulo="Chame a galera"
+              subtitulo="Seu bolão está pronto. Mande o convite e os palpites começam a chegar." />
+            <ConviteCard />
+            <div className="flex justify-between items-center mt-6">
+              <button onClick={() => setPasso(2)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
+                <ChevronLeft size={15} /> Voltar
+              </button>
+              <button onClick={aoFechar} className="v2-btn-primary px-5 py-2.5 text-sm">
+                <Check size={15} /> Concluir
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Roteiro do primeiro acesso. A ordem segue o que o organizador precisa fazer
 // para o bolão rodar, não a ordem do menu: primeiro o que trava a operação
 // (PIX e WhatsApp), depois o dia a dia, e a assinatura por último.
@@ -989,17 +1189,22 @@ const AdminPanel = ({ setView }) => {
   // nem exige mudança nas regras.
   const chaveTour = `tour-admin:${currentUser?.id || 'anon'}:${tenantId}`;
   const [mostrarTour, setMostrarTour] = useState(false);
+  const [mostrarWizard, setMostrarWizard] = useState(false);
+
+  // No primeiro acesso abre o ASSISTENTE, não o tour: apontar para os botões
+  // sem deixar preencher obriga o organizador a refazer tudo depois.
   useEffect(() => {
     if (!currentUser?.id || currentUser?.globalAdmin) return;
     try {
-      if (!localStorage.getItem(chaveTour)) setMostrarTour(true);
+      if (!localStorage.getItem(chaveTour)) setMostrarWizard(true);
     } catch { /* navegador sem localStorage: só não mostra */ }
   }, [chaveTour, currentUser?.id, currentUser?.globalAdmin]);
 
-  const encerrarTour = () => {
-    setMostrarTour(false);
+  const marcarVisto = () => {
     try { localStorage.setItem(chaveTour, new Date().toISOString()); } catch { /* idem */ }
   };
+  const encerrarTour = () => { setMostrarTour(false); marcarVisto(); };
+  const encerrarWizard = () => { setMostrarWizard(false); marcarVisto(); };
   const [editingRound, setEditingRound] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingEstablishment, setEditingEstablishment] = useState(null);
@@ -3530,6 +3735,7 @@ const AdminPanel = ({ setView }) => {
   return (
     <div className="min-h-screen font-body flex page-bg">
 
+      {mostrarWizard && <SetupWizard aoFechar={encerrarWizard} />}
       {mostrarTour && (
         <GuidedTour passos={PASSOS_TOUR} aoTrocarAba={setActiveTab} aoFechar={encerrarTour} />
       )}
@@ -4033,16 +4239,22 @@ const AdminPanel = ({ setView }) => {
             {/* WhatsApp Settings */}
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
+                {!currentUser?.globalAdmin && <ConviteCard />}
                 {!currentUser?.globalAdmin && (
                   <div className="bg-white rounded-xl shadow-sm border p-6">
-                    <h3 className="text-lg font-bold mb-2">Tutorial do painel</h3>
+                    <h3 className="text-lg font-bold mb-2">Ajuda</h3>
                     <p className="text-sm text-gray-600 mb-4">
-                      Reveja o passo a passo com as principais funções e o que precisa
-                      estar configurado para o bolão rodar.
+                      Refaça a configuração inicial se algo mudou, ou percorra o painel
+                      para relembrar onde fica cada coisa.
                     </p>
-                    <button onClick={() => setMostrarTour(true)} className="v2-btn-outline px-5 py-2.5 text-sm">
-                      <Bell size={16} /> Rever tutorial
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button onClick={() => setMostrarWizard(true)} className="v2-btn-outline px-5 py-2.5 text-sm">
+                        <Edit2 size={16} /> Refazer configuração
+                      </button>
+                      <button onClick={() => setMostrarTour(true)} className="v2-btn-ghost px-5 py-2.5 text-sm">
+                        <Bell size={16} /> Tour do painel
+                      </button>
+                    </div>
                   </div>
                 )}
                 {!currentUser?.globalAdmin && <RecorrenciaCard />}
@@ -4354,11 +4566,19 @@ const AdminPanel = ({ setView }) => {
                   onClick={async () => {
                     setSyncRoundsLoading(true);
                     try {
-                      const res = await fetch('/api/cron/sync-rounds', { method: 'POST' });
+                      const idToken = await getIdToken();
+                      const res = await fetch('/api/rounds/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ idToken, tenantId }),
+                      });
                       const data = await res.json();
-                      alert('Sync concluído!\n\n' + (data.logs || []).join('\n'));
+                      // Só anuncia sucesso quando houve sucesso: a versão
+                      // anterior exibia "concluído" mesmo diante de 401.
+                      if (!res.ok) throw new Error(data.error || `Falha (HTTP ${res.status})`);
+                      alert(data.mensagem);
                     } catch (e) {
-                      alert('Erro ao sincronizar: ' + e.message);
+                      alert('Não foi possível buscar as rodadas: ' + e.message);
                     } finally {
                       setSyncRoundsLoading(false);
                     }

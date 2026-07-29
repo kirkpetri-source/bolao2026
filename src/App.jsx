@@ -592,7 +592,12 @@ const LoginScreen = ({ setView }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [showRegister, setShowRegister] = useState(false);
+  // O convite do organizador aponta para ?cadastro=1: quem chega pelo link do
+  // amigo cai direto no formulário, sem ter que descobrir onde se cadastra.
+  const [showRegister, setShowRegister] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('cadastro') === '1'; }
+    catch { return false; }
+  });
   const [reg, setReg] = useState({ name: '', whatsapp: '', password: '', confirmPassword: '', establishmentId: '' });
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showForgot, setShowForgot] = useState(false);

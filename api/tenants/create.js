@@ -5,6 +5,7 @@ import { getAdminDb, getAdminAuth, FieldValue } from '../_shared/firebaseAdmin.j
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { trialSubscription } from '../_shared/subscription.js';
 import { emailKey } from '../_shared/emailIndex.js';
+import { seedRoundsForTenant } from '../_shared/seedRounds.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 
@@ -139,7 +140,19 @@ export default async function handler(req, res) {
       throw e;
     }
 
-    return res.status(200).json({ ok: true, tenantId: slug });
+    // Rodadas na hora: sem isso o organizador termina o cadastro e encontra um
+    // painel vazio, porque o cron que busca na API só roda de madrugada.
+    // Falha aqui não desfaz o bolão — o cron corrige no dia seguinte.
+    let rodadas = 0;
+    try {
+      const r = await seedRoundsForTenant(db, slug);
+      rodadas = r.criadas;
+      if (r.motivo) console.log(`tenants/create: rodadas não semeadas — ${r.motivo}`);
+    } catch (e) {
+      console.error('tenants/create: falha ao semear rodadas:', e.message);
+    }
+
+    return res.status(200).json({ ok: true, tenantId: slug, rodadas });
   } catch (err) {
     console.error('tenants/create:', err);
     return res.status(500).json({ error: 'Erro ao criar o bolão. Tente novamente.' });

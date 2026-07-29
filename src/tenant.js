@@ -33,7 +33,20 @@ export function publicConfigDocId(tid) {
   return tid === DEFAULT_TENANT_ID ? 'main' : tid;
 }
 
+// `cadastro=1` abre o formulário de cadastro já na chegada — quem recebe o
+// convite do amigo não deveria precisar procurar onde se inscreve.
 export function inviteUrl(tid) {
-  try { return `${window.location.origin}/?t=${encodeURIComponent(tid)}`; }
-  catch { return `/?t=${encodeURIComponent(tid)}`; }
+  const q = `?t=${encodeURIComponent(tid)}&cadastro=1`;
+  try { return `${window.location.origin}/${q}`; }
+  catch { return `/${q}`; }
+}
+
+// Mensagem pronta para o organizador colar no grupo. Sem emoji em excesso e
+// sem promessa de prêmio, que varia de bolão para bolão.
+export function inviteMessage(nomeDoBolao, url) {
+  return `🏆 *${nomeDoBolao}*\n\n`
+    + `Você está convidado para o nosso bolão do Brasileirão!\n\n`
+    + `É só entrar pelo link, se cadastrar com seu WhatsApp e fazer os palpites de cada rodada:\n`
+    + `${url}\n\n`
+    + `Boa sorte! ⚽`;
 }
