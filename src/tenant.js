@@ -50,14 +50,20 @@ export function tenantPedidoNaUrl() {
   } catch { return null; }
 }
 
+// O bolão vem SÓ da URL. O último visitado não entra aqui de propósito: quem
+// digita a raiz está pedindo a porta de entrada, e mandá-lo direto para um bolão
+// guardado no navegador é surpresa — pior ainda em computador compartilhado, em
+// que a pessoa cairia no bolão de outro. O atalho para o último bolão aparece na
+// tela de entrada, como oferta, não como desvio automático.
 export function resolveTenantId() {
   const pedido = tenantPedidoNaUrl();
   if (pedido) { rememberTenant(pedido); return pedido; }
-  try {
-    const guardado = localStorage.getItem(STORAGE_KEY);
-    if (guardado) return guardado;
-  } catch {}
-  return null;   // sem bolão: a tela de entrada assume
+  return null;   // sem bolão na URL: a tela de entrada assume
+}
+
+// Último bolão visitado, para a tela de entrada oferecer o atalho.
+export function ultimoBolaoVisitado() {
+  try { return localStorage.getItem(STORAGE_KEY) || null; } catch { return null; }
 }
 
 // O bolão padrão ainda usa o doc histórico 'main' em /public_config.

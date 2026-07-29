@@ -1154,6 +1154,18 @@ function App() {
   // teste da plataforma, que não tem organizador para cobrar nem premiar.
   if (!tenantId && !currentUser) return <Entrada setView={setView} />;
 
+  // Logado e ainda sem bolão resolvido: o observador de autenticação está
+  // buscando o bolão da pessoa. Sem esta espera, o painel piscaria vazio.
+  if (currentUser && !tenantId && !currentUser.globalAdmin) {
+    return (
+      <div className="min-h-screen page-bg flex items-center justify-center font-body">
+        <div className="flex items-center gap-3 text-noite-400">
+          <Loader2 size={20} className="animate-spin" /> Abrindo seu bolão...
+        </div>
+      </div>
+    );
+  }
+
   // Endereço digitado errado. Dizer isso evita que a pessoa fique olhando uma
   // tela vazia achando que o sistema quebrou.
   if (bolaoInexistente && !currentUser) {

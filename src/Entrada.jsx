@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, LogIn, Loader2, ArrowRight, Search } from 'lucide-react';
 import { loginWithWhatsapp } from './authService.js';
+import { ultimoBolaoVisitado, esquecerTenant } from './tenant.js';
 
 // Página da raiz do site.
 //
@@ -17,6 +18,8 @@ export default function Entrada({ setView }) {
   const [erro, setErro] = useState('');
   const [entrando, setEntrando] = useState(false);
   const [mostrarLogin, setMostrarLogin] = useState(false);
+  // Atalho, nunca desvio: quem digitou a raiz continua vendo a raiz.
+  const [ultimo, setUltimo] = useState(() => ultimoBolaoVisitado());
 
   // Lista de bolões para quem perdeu o link. Carregada sob demanda: na maioria
   // dos acessos a pessoa chega pelo link certo e não precisa dela.
@@ -75,6 +78,20 @@ export default function Entrada({ setView }) {
             algo como <span className="font-mono text-noite-700">.../nome-do-bolao</span>.
             É por ele que você se cadastra e faz seus palpites.
           </p>
+
+          {ultimo && (
+            <div className="rounded-xl border border-gray-200 p-3 mb-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-noite-400">Você esteve aqui</p>
+                <p className="text-sm font-semibold text-noite-800 truncate">{ultimo}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a href={`/${ultimo}`} className="v2-btn-primary px-4 py-2 text-sm">Voltar</a>
+                <button onClick={() => { esquecerTenant(); setUltimo(null); }}
+                  className="text-xs text-noite-400 hover:text-noite-700">Esquecer</button>
+              </div>
+            </div>
+          )}
 
           {boloes === null ? (
             <button onClick={abrirLista} disabled={buscando} className="v2-btn-outline w-full py-3 mb-3 disabled:opacity-60">
