@@ -7,6 +7,7 @@
 // membro desse tenant). Se o alvo ainda for membro de OUTRO tenant, remove só
 // o vínculo — a conta global permanece.
 import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
+import { releaseEmail } from '../_shared/emailIndex.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -63,12 +64,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, removed: 'membership' });
     }
 
-    // Sem outros vínculos: exclusão completa (doc + Auth).
+    // Sem outros vínculos: exclusão completa (doc + Auth + índice de e-mail).
+    // O índice precisa cair junto, senão o e-mail continua reservado e a pessoa
+    // não consegue se cadastrar de novo — o mesmo tipo de trava que a conta
+    // órfã no Auth causava com o WhatsApp.
+    const alvoSnap = await db.collection('users').doc(targetUserId).get();
+    const emailDoAlvo = alvoSnap.exists ? alvoSnap.data().email : '';
+
     await db.collection('users').doc(targetUserId).delete();
     try { await auth.deleteUser(targetUserId); }
     catch (e) { if (e?.code !== 'auth/user-not-found') throw e; }
+    if (emailDoAlvo) await releaseEmail(db, emailDoAlvo);
 
-    return res.status(200).json({ ok: true, removed: 'account' });
+    return res.status(200).json({ ok: true, removed: 'account', emailLiberado: !!emailDoAlvo });
   } catch (err) {
     console.error('admin/delete-user:', err.message);
     return res.status(500).json({ error: err.message || 'Erro ao excluir usuário' });

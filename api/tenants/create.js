@@ -4,18 +4,13 @@
 import { getAdminDb, getAdminAuth, FieldValue } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { trialSubscription } from '../_shared/subscription.js';
+import { emailKey } from '../_shared/emailIndex.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 
 function normWpp(s) {
   const d = String(s || '').replace(/\D/g, '');
   return d.length > 11 ? d.slice(-11) : d;
-}
-
-// Id de documento derivado do e-mail: minúsculo, sem barra e dentro do limite
-// de 1500 bytes do Firestore.
-function emailKey(email) {
-  return String(email).toLowerCase().replace(/[^a-z0-9@._+-]/g, '_').slice(0, 200);
 }
 
 function slugify(name) {
