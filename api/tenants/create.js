@@ -14,6 +14,14 @@ function normWpp(s) {
   return d.length > 11 ? d.slice(-11) : d;
 }
 
+// Caminhos do proprio site: um bolao chamado "plataforma" sequestraria a rota
+// do console. A lista precisa acompanhar as rotas em vercel.json.
+const RESERVADOS = new Set([
+  'plataforma', 'ranking', 'api', 'assets', 'admin', 'login', 'cadastro',
+  'app', 'painel', 'conta', 'suporte', 'ajuda', 'sobre', 'termos', 'privacidade',
+  'index', 'version', 'favicon', 'robots', 'sitemap', 'bolao', 'boloes',
+]);
+
 function slugify(name) {
   return String(name || '')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -57,11 +65,15 @@ export default async function handler(req, res) {
     if (count >= RL_MAX) return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.' });
     await rlRef.set({ count: count + 1, windowStart, updatedAt: now });
 
-    // Slug único do tenant.
-    let slug = slugify(bolaoName);
-    if (slug === DEFAULT_TENANT_ID) slug = `${slug}-2`;
-    for (let i = 2; (await db.collection('tenants').doc(slug).get()).exists; i++) {
-      slug = `${slugify(bolaoName)}-${i}`;
+    // O slug vem do nome e é o endereço do bolão. Antes, nome repetido virava
+    // "-2", e dois bolões com o MESMO nome na tela confundiam o participante
+    // justamente na hora de confirmar em qual ele está entrando. Agora recusa.
+    const slug = slugify(bolaoName);
+    if (slug === DEFAULT_TENANT_ID || RESERVADOS.has(slug)) {
+      return res.status(409).json({ error: 'Esse nome não pode ser usado. Escolha outro para o seu bolão.' });
+    }
+    if ((await db.collection('tenants').doc(slug).get()).exists) {
+      return res.status(409).json({ error: 'Já existe um bolão com esse nome. Escolha outro.' });
     }
 
     // Conta do organizador no Auth (e-mail sintético do WhatsApp).
@@ -95,7 +107,7 @@ export default async function handler(req, res) {
         lastTenantId: slug,
         createdAt: FieldValue.serverTimestamp(),
       });
-      batch.set(db.collection('tenants').doc(slug), {
+      batch.create(db.collection('tenants').doc(slug), {
         name: bolaoName,
         ownerId: uid,
         ownerEmail: email,
@@ -124,6 +136,10 @@ export default async function handler(req, res) {
       });
       batch.set(db.collection('public_config').doc(slug), {
         tenantId: slug,
+        // `slug` e o endereco canonico; `slugPlano` deixa /bolaododeryck achar
+        // /bolao-do-deryck, que e como as pessoas digitam de cabeca.
+        slug,
+        slugPlano: slug.replace(/-/g, ''),
         brandName: bolaoName,
         betValue,
         maintenanceMode: false,

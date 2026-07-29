@@ -9,6 +9,7 @@ import { SERIE_A_2026_TEAMS } from './constants.js';
 import { resolveTenantId, rememberTenant, publicConfigDocId, DEFAULT_TENANT_ID } from './tenant.js';
 import NovaVersao from './components/NovaVersao.jsx';
 import Plataforma from './Plataforma.jsx';
+import Entrada from './Entrada.jsx';
 import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
@@ -211,7 +212,7 @@ const AppProvider = ({ children }) => {
   // Dados protegidos: só após autenticação. Re-assina ao trocar de usuário e
   // limpa ao deslogar. Coleções de admin só são assinadas por admin.
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !tenantId) {
       setUsers([]); setTeams([]); setRounds([]); setPredictions([]);
       setCommunications([]); setTeamImportRequests([]); setTenantMembers([]);
       return;
@@ -260,6 +261,9 @@ const AppProvider = ({ children }) => {
   // usuário comum lê apenas /public_config/main (sem segredos). Ao carregar o
   // settings completo, o admin espelha os campos públicos em public_config.
   useEffect(() => {
+    // Sem bolão na URL nem no histórico, a raiz é a página de entrada: não há
+    // configuração para buscar e nada deve ser carregado do bolão padrão.
+    if (!tenantId) { setSettings(null); return; }
     const isAdmin = !!currentUser?.isAdmin;
     let unsub;
     if (isAdmin) {
@@ -1059,7 +1063,7 @@ function ehRotaDaPlataforma() {
 }
 
 function App() {
-  const { currentUser, loading, settings } = useApp();
+  const { currentUser, loading, settings, tenantId } = useApp();
   const [view, setView] = useState('login');
   const naPlataforma = ehRotaDaPlataforma();
 
@@ -1116,6 +1120,12 @@ function App() {
   }
 
   if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
+
+  // Sem bolão na URL nem no histórico: a raiz não cadastra ninguém. Isso
+  // impedia que quem digitasse só o endereço do site fosse parar no bolão de
+  // teste da plataforma, que não tem organizador para cobrar nem premiar.
+  if (!tenantId && !currentUser) return <Entrada setView={setView} />;
+
   if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
   // Gating global: se manutenção estiver ativa, usuários logados não-admin são direcionados à tela de manutenção
   if (settings?.maintenanceMode && (currentUser && !currentUser.isAdmin)) {

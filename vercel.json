@@ -44,6 +44,10 @@
     {
       "source": "/plataforma",
       "destination": "/index.html"
+    },
+    {
+      "source": "/:slug",
+      "destination": "/index.html"
     }
   ],
   "redirects": [

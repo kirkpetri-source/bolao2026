@@ -1,48 +1,77 @@
-// Resolução do tenant no cliente (Fase 3 do SaaS).
+// Resolução do bolão no cliente.
 //
-// Ordem de resolução ao abrir o app:
-//  1. Link de convite `?t=<slug>` na URL — grava e passa a valer.
-//  2. Último tenant usado (localStorage).
-//  3. Tenant padrão (o bolão original da Lion Tech).
+// Ordem: caminho da URL (/meu-bolao) > ?t=<slug> (links antigos) > último usado
+// (localStorage). Sem nenhum desses, NÃO há bolão: a raiz virou uma página de
+// entrada, e não o bolão da plataforma.
 //
-// Após o login, o AppProvider pode trocar para o `lastTenantId` gravado no doc
-// do usuário (o tenant onde ele se cadastrou por último).
-// Mantém em sincronia com api/_shared/tenant.js (backend).
+// Antes a raiz caía no bolão padrão, então quem digitava só o endereço do site
+// se cadastrava no bolão de teste da Lion Tech — um bolão sem organizador de
+// verdade. Mantém em sincronia com api/_shared/tenant.js (backend).
 
 export const DEFAULT_TENANT_ID = 'bolao-lion-tech';
 
 const STORAGE_KEY = 'bb.tenantId';
 
+// Caminhos do próprio site. Precisa acompanhar as rotas de vercel.json e a
+// lista RESERVADOS de api/tenants/create.js, senão um bolão poderia nascer com
+// um nome que sequestra uma rota.
+export const CAMINHOS_RESERVADOS = new Set([
+  '', 'plataforma', 'ranking', 'api', 'assets', 'index.html', 'version.json',
+  'favicon.ico', 'robots.txt',
+]);
+
 export function rememberTenant(tid) {
   try { localStorage.setItem(STORAGE_KEY, tid); } catch {}
 }
 
-export function resolveTenantId() {
-  try {
-    const fromUrl = new URL(window.location.href).searchParams.get('t');
-    if (fromUrl) { rememberTenant(fromUrl); return fromUrl; }
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return stored;
-  } catch {}
-  return DEFAULT_TENANT_ID;
+export function esquecerTenant() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
 }
 
-// O tenant padrão continua usando o doc histórico 'main' em /public_config;
-// tenants novos usam o próprio slug como ID do doc.
+// Primeiro trecho do caminho, quando ele parece um bolão.
+export function slugDaUrl(href) {
+  try {
+    const { pathname } = new URL(href || window.location.href);
+    const partes = pathname.split('/').filter(Boolean);
+    if (partes.length !== 1) return null;           // /ranking/123 não é bolão
+    const p = decodeURIComponent(partes[0]).toLowerCase();
+    if (CAMINHOS_RESERVADOS.has(p)) return null;
+    return /^[a-z0-9-]{3,60}$/.test(p) ? p : null;
+  } catch { return null; }
+}
+
+// Devolve o bolão pedido na URL, ou null quando a pessoa chegou na raiz.
+export function tenantPedidoNaUrl() {
+  const doCaminho = slugDaUrl();
+  if (doCaminho) return doCaminho;
+  try {
+    const t = new URL(window.location.href).searchParams.get('t');
+    return t ? String(t).toLowerCase() : null;
+  } catch { return null; }
+}
+
+export function resolveTenantId() {
+  const pedido = tenantPedidoNaUrl();
+  if (pedido) { rememberTenant(pedido); return pedido; }
+  try {
+    const guardado = localStorage.getItem(STORAGE_KEY);
+    if (guardado) return guardado;
+  } catch {}
+  return null;   // sem bolão: a tela de entrada assume
+}
+
+// O bolão padrão ainda usa o doc histórico 'main' em /public_config.
 export function publicConfigDocId(tid) {
   return tid === DEFAULT_TENANT_ID ? 'main' : tid;
 }
 
-// `cadastro=1` abre o formulário de cadastro já na chegada — quem recebe o
-// convite do amigo não deveria precisar procurar onde se inscreve.
+// Endereço do bolão: curto, sem parâmetro, fácil de ditar por telefone.
 export function inviteUrl(tid) {
-  const q = `?t=${encodeURIComponent(tid)}&cadastro=1`;
-  try { return `${window.location.origin}/${q}`; }
-  catch { return `/${q}`; }
+  try { return `${window.location.origin}/${encodeURIComponent(tid)}`; }
+  catch { return `/${tid}`; }
 }
 
-// Mensagem pronta para o organizador colar no grupo. Sem emoji em excesso e
-// sem promessa de prêmio, que varia de bolão para bolão.
+// Mensagem pronta para o organizador colar no grupo.
 export function inviteMessage(nomeDoBolao, url) {
   return `🏆 *${nomeDoBolao}*\n\n`
     + `Você está convidado para o nosso bolão do Brasileirão!\n\n`
