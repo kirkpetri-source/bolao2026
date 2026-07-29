@@ -55,8 +55,14 @@ export default async function handler(req, res) {
       // O bolão original é da própria Lion Tech: não se cobra de si mesmo.
       if (tenantId === DEFAULT_TENANT_ID) continue;
 
-      // Tenant criado antes da assinatura existir ganha um teste a partir de agora.
-      const sub = tenant.subscription || trialSubscription(now);
+      // Tenant sem assinatura — ou com uma sem datas, como acontece quando uma
+      // cobrança é gerada antes do primeiro ciclo do cron — ganha um teste
+      // a partir de agora. Checar só a existência do campo deixaria um
+      // subscription pela metade passar batido e virar dias negativos.
+      const semPeriodo = !accessEndsAt(tenant.subscription);
+      const sub = semPeriodo
+        ? { ...(tenant.subscription || {}), ...trialSubscription(now) }
+        : tenant.subscription;
       const novo = evaluateStatus(sub, now);
       const mudou = novo !== sub.status;
 
@@ -65,7 +71,7 @@ export default async function handler(req, res) {
         patch['subscription.status'] = novo;
         if (novo === STATUS.BLOCKED) patch['subscription.blockedAt'] = now;
       }
-      if (!tenant.subscription) patch.subscription = sub;
+      if (semPeriodo) patch.subscription = sub;
 
       // Avisa em toda transição e, fora dela, quando falta pouco para vencer.
       const faltam = daysUntil(accessEndsAt(sub), now);

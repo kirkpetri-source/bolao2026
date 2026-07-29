@@ -60,7 +60,12 @@ export default async function handler(req, res) {
     }
 
     const charge = wooviRes.data.charge;
-    await tenantRef.update({ 'subscription.pendingChargeId': correlationID });
+    // Se o bolão ainda não tem assinatura gravada, grava a inteira. Escrever só
+    // o pendingChargeId criaria um subscription sem datas, que o cron leria como
+    // assinatura válida e nunca semearia o teste.
+    await tenantRef.update(tenant.subscription
+      ? { 'subscription.pendingChargeId': correlationID }
+      : { subscription: { ...sub, pendingChargeId: correlationID } });
 
     return res.status(200).json({
       correlationID,

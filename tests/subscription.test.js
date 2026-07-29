@@ -69,6 +69,15 @@ describe('assinatura do SaaS', () => {
     expect(evaluateStatus(null, T0)).toBe(STATUS.TRIAL);
     expect(isBlocked(undefined, T0)).toBe(false);
   });
+
+  // Uma cobranca gerada antes do primeiro ciclo do cron deixa o documento com
+  // subscription mas sem datas. accessEndsAt precisa acusar isso como zero para
+  // o cron semear o teste, em vez de calcular dias negativos.
+  it('assinatura pela metade conta como sem periodo', () => {
+    expect(accessEndsAt({ pendingChargeId: 'assinatura_x_1' })).toBe(0);
+    expect(accessEndsAt({})).toBe(0);
+    expect(evaluateStatus({ pendingChargeId: 'assinatura_x_1' }, T0)).toBe(STATUS.TRIAL);
+  });
 });
 
 describe('renovacao ao confirmar pagamento', () => {
