@@ -18,6 +18,7 @@ const WhatsAppConnectCard = () => {
   const { tenantId } = useApp();
   const [conn, setConn] = useState({ loading: true, state: null, number: '', qr: null, error: '' });
   const pollRef = useRef(null);
+  const qrRef = useRef(null);
 
   const callApi = async (action) => {
     const idToken = await getIdToken();
@@ -31,7 +32,10 @@ const WhatsAppConnectCard = () => {
     return data;
   };
 
-  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  const stopPoll = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (qrRef.current) { clearInterval(qrRef.current); qrRef.current = null; }
+  };
 
   const refresh = async () => {
     try {
@@ -42,6 +46,29 @@ const WhatsAppConnectCard = () => {
       setConn(c => ({ ...c, loading: false, error: e.message }));
       stopPoll();
     }
+  };
+
+  // O Evolution rotaciona o QR a cada ~20s. Sem renovar a imagem, o código morre
+  // enquanto o usuário navega até "Conectar um aparelho" no celular e o WhatsApp
+  // recusa o vínculo.
+  const refreshQr = async () => {
+    try {
+      const d = await callApi('connect');
+      if (d.state === 'open') {
+        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, error: '' });
+        stopPoll();
+        return;
+      }
+      if (d.qr) setConn(c => ({ ...c, qr: d.qr, error: '' }));
+    } catch {
+      // Mantém o QR atual na tela; o polling de status reporta falha persistente.
+    }
+  };
+
+  const startPolling = () => {
+    stopPoll();
+    pollRef.current = setInterval(refresh, 4000);
+    qrRef.current = setInterval(refreshQr, 12000);
   };
 
   useEffect(() => { refresh(); return stopPoll; }, [tenantId]);
@@ -55,8 +82,7 @@ const WhatsAppConnectCard = () => {
         return;
       }
       setConn({ loading: false, state: 'connecting', number: '', qr: d.qr, error: d.qr ? '' : (d.note || 'QR indisponível — tente novamente') });
-      stopPoll();
-      pollRef.current = setInterval(refresh, 4000);
+      startPolling();
     } catch (e) {
       setConn(c => ({ ...c, loading: false, error: e.message }));
     }
@@ -111,7 +137,7 @@ const WhatsAppConnectCard = () => {
                   <li>Toque em <strong>Conectar um aparelho</strong></li>
                   <li>Aponte a câmera para este QR Code</li>
                 </ol>
-                <p className="text-xs text-gray-400">O código expira em ~1 minuto. A tela atualiza sozinha quando conectar.</p>
+                <p className="text-xs text-gray-400">O código se renova sozinho enquanto esta tela estiver aberta. Escaneie sem pressa — ela avisa assim que conectar.</p>
                 <button onClick={handleConnect} className="px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2"><RefreshCcw size={14} /> Gerar novo QR</button>
               </div>
             </div>
