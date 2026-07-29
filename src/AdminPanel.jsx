@@ -163,8 +163,10 @@ const ConviteCard = () => {
 // botões, aqui o organizador PREENCHE os dados enquanto avança — ao terminar,
 // o bolão está apto a funcionar e só falta ele mandar o link para os amigos.
 const SetupWizard = ({ aoFechar }) => {
-  const { settings, updateSettings } = useApp();
+  const { settings, updateSettings, tenantId, rounds } = useApp();
   const [passo, setPasso] = useState(0);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [resultadoRodadas, setResultadoRodadas] = useState('');
   const [pixKey, setPixKey] = useState(settings?.payment?.pixKey || settings?.pixKey || '');
   const [recebedor, setRecebedor] = useState(settings?.payment?.pixRecipientName || '');
   const [valor, setValor] = useState(settings?.betValue ?? 15);
@@ -191,7 +193,26 @@ const SetupWizard = ({ aoFechar }) => {
     }
   };
 
-  const total = 4;
+  const buscarRodadas = async () => {
+    setSincronizando(true); setResultadoRodadas('');
+    try {
+      const idToken = await getIdToken();
+      const res = await fetch('/api/rounds/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, tenantId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `Falha (HTTP ${res.status})`);
+      setResultadoRodadas(d.mensagem);
+    } catch (e) {
+      setResultadoRodadas('Não foi possível buscar as rodadas: ' + e.message);
+    } finally {
+      setSincronizando(false);
+    }
+  };
+
+  const total = 5;
   const Cabecalho = ({ titulo, subtitulo }) => (
     <>
       <div className="flex items-center justify-between gap-3 mb-1">
@@ -222,8 +243,9 @@ const SetupWizard = ({ aoFechar }) => {
               subtitulo="Três passos rápidos. Ao final você já sai com o link para chamar a galera." />
             <ul className="text-sm text-noite-600 space-y-2.5 mb-6">
               <li><strong>1.</strong> A chave PIX que vai receber as cartelas e quanto custa cada uma.</li>
-              <li><strong>2.</strong> O WhatsApp do bolão, que envia confirmações e cobranças.</li>
-              <li><strong>3.</strong> O convite pronto para mandar no grupo.</li>
+              <li><strong>2.</strong> As rodadas do Brasileirão no seu bolão.</li>
+              <li><strong>3.</strong> O WhatsApp do bolão, que envia confirmações e cobranças.</li>
+              <li><strong>4.</strong> O convite pronto para mandar no grupo.</li>
             </ul>
             <div className="flex justify-between items-center">
               <button onClick={aoFechar} className="text-xs text-noite-400 hover:text-noite-700">Fazer isso depois</button>
@@ -270,16 +292,46 @@ const SetupWizard = ({ aoFechar }) => {
 
         {passo === 2 && (
           <>
-            <Cabecalho titulo="WhatsApp do bolão"
-              subtitulo="Escaneie o QR Code com o celular que vai falar com os participantes." />
-            <WhatsAppConnectCard />
+            <Cabecalho titulo="Rodadas do Brasileirão"
+              subtitulo="Os jogos entram automaticamente todos os dias. Aqui você confere se já estão no seu bolão." />
+            <div className="rounded-xl border border-gray-200 p-4 mb-4">
+              <p className="text-sm text-noite-600 mb-3">
+                Seu bolão tem <strong>{rounds?.length || 0}</strong> rodada(s) cadastrada(s).
+              </p>
+              <button onClick={buscarRodadas} disabled={sincronizando}
+                className="v2-btn-outline px-4 py-2.5 text-sm disabled:opacity-60">
+                {sincronizando ? <Loader2 size={15} className="animate-spin" /> : <RefreshCcw size={15} />}
+                Buscar rodadas agora
+              </button>
+              {resultadoRodadas && <p className="text-sm text-noite-600 mt-3 leading-relaxed">{resultadoRodadas}</p>}
+              <p className="text-xs text-noite-400 mt-3 leading-relaxed">
+                Rodada que já começou não é aberta: palpite com a partida em andamento
+                seria injusto com quem apostou antes.
+              </p>
+            </div>
             <div className="flex justify-between items-center mt-6">
               <button onClick={() => setPasso(1)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
                 <ChevronLeft size={15} /> Voltar
               </button>
+              <button onClick={() => setPasso(3)} className="v2-btn-primary px-5 py-2.5 text-sm">
+                Continuar <ChevronRight size={15} />
+              </button>
+            </div>
+          </>
+        )}
+
+        {passo === 3 && (
+          <>
+            <Cabecalho titulo="WhatsApp do bolão"
+              subtitulo="Escaneie o QR Code com o celular que vai falar com os participantes." />
+            <WhatsAppConnectCard />
+            <div className="flex justify-between items-center mt-6">
+              <button onClick={() => setPasso(2)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
+                <ChevronLeft size={15} /> Voltar
+              </button>
               <div className="flex items-center gap-2">
-                <button onClick={() => setPasso(3)} className="text-xs text-noite-400 hover:text-noite-700">Conectar depois</button>
-                <button onClick={() => setPasso(3)} className="v2-btn-primary px-5 py-2.5 text-sm">
+                <button onClick={() => setPasso(4)} className="text-xs text-noite-400 hover:text-noite-700">Conectar depois</button>
+                <button onClick={() => setPasso(4)} className="v2-btn-primary px-5 py-2.5 text-sm">
                   Continuar <ChevronRight size={15} />
                 </button>
               </div>
@@ -287,13 +339,13 @@ const SetupWizard = ({ aoFechar }) => {
           </>
         )}
 
-        {passo === 3 && (
+        {passo === 4 && (
           <>
             <Cabecalho titulo="Chame a galera"
               subtitulo="Seu bolão está pronto. Mande o convite e os palpites começam a chegar." />
             <ConviteCard />
             <div className="flex justify-between items-center mt-6">
-              <button onClick={() => setPasso(2)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
+              <button onClick={() => setPasso(3)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
                 <ChevronLeft size={15} /> Voltar
               </button>
               <button onClick={aoFechar} className="v2-btn-primary px-5 py-2.5 text-sm">

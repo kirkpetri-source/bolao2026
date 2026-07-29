@@ -26,9 +26,12 @@ function fakeDb({ rodadasDoNovo = [], rodadasDaFonte = [] }) {
   };
 }
 
+const DIA = 24 * 60 * 60 * 1000;
+const daquiA = (ms) => new Date(Date.now() + ms).toISOString();
+
 const oficial = (over = {}) => ({
   number: 21, apiRoundNumber: 21, name: 'Rodada 21', status: 'upcoming',
-  matches: [{ id: 1 }], autoSyncedAt: new Date(), ...over,
+  matches: [{ id: 1, date: daquiA(10 * DIA) }], autoSyncedAt: new Date(), ...over,
 });
 
 describe('semear rodadas de um bolao novo', () => {
@@ -59,7 +62,40 @@ describe('semear rodadas de um bolao novo', () => {
   });
 
   it('NAO copia rodada ja encerrada', async () => {
-    const db = fakeDb({ rodadasDaFonte: [oficial({ status: 'finished' }), oficial({ status: 'closed' })] });
+    const db = fakeDb({ rodadasDaFonte: [
+      oficial({ status: 'finished', matches: [{ id: 1, date: daquiA(-30 * DIA) }] }),
+      oficial({ status: 'closed', matches: [{ id: 1, date: daquiA(-10 * DIA) }] }),
+    ] });
+    expect((await seedRoundsForTenant(db, 'novo')).criadas).toBe(0);
+  });
+
+  it('NAO abre rodada com jogo ja em andamento, e avisa qual foi', async () => {
+    // O status guardado so muda quando o cron passa: uma rodada pode estar
+    // gravada como "open" com a bola ja rolando. Copiar assim deixaria alguem
+    // palpitar vendo o jogo acontecer.
+    const db = fakeDb({ rodadasDaFonte: [
+      oficial({ number: 21, status: 'open', matches: [{ id: 1, date: daquiA(-2 * 36e5) }] }),
+      oficial({ number: 22, matches: [{ id: 1, date: daquiA(9 * DIA) }] }),
+    ] });
+    const r = await seedRoundsForTenant(db, 'novo');
+    expect(r.criadas).toBe(1);
+    expect(r.emAndamento).toEqual([21]);
+    expect(db.criadas[0].number).toBe(22);
+  });
+
+  it('recalcula o status pela data do jogo, nao pelo que estava gravado', async () => {
+    const db = fakeDb({ rodadasDaFonte: [
+      oficial({ number: 22, status: 'upcoming', matches: [{ id: 1, date: daquiA(2 * DIA) }] }),
+      oficial({ number: 23, status: 'open', matches: [{ id: 1, date: daquiA(20 * DIA) }] }),
+    ] });
+    await seedRoundsForTenant(db, 'novo');
+    // Jogo em 2 dias entra aberta; jogo em 20 dias entra como futura.
+    expect(db.criadas.find(c => c.number === 22).status).toBe('open');
+    expect(db.criadas.find(c => c.number === 23).status).toBe('upcoming');
+  });
+
+  it('NAO copia rodada sem data de jogo, por nao dar para garantir', async () => {
+    const db = fakeDb({ rodadasDaFonte: [oficial({ matches: [{ id: 1 }] })] });
     expect((await seedRoundsForTenant(db, 'novo')).criadas).toBe(0);
   });
 

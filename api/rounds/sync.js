@@ -28,16 +28,26 @@ export default async function handler(req, res) {
       }
     }
 
-    const { criadas, motivo } = await seedRoundsForTenant(db, tenantId);
+    const { criadas, emAndamento = [], motivo } = await seedRoundsForTenant(db, tenantId);
+
+    // Avisa quais rodadas ficaram de fora por já estarem rolando. Sem isso o
+    // organizador acha que o sistema esqueceu uma rodada — quando na verdade
+    // ela foi barrada de propósito, para ninguém palpitar com o jogo em curso.
+    const aviso = emAndamento.length
+      ? ` A rodada ${emAndamento.join(', ')} não foi aberta porque os jogos dela já começaram — palpite com a partida em andamento seria injusto com quem apostou antes.`
+      : '';
 
     if (criadas > 0) {
-      return res.status(200).json({ criadas, mensagem: `${criadas} rodada(s) trazidas para o seu bolão.` });
+      return res.status(200).json({
+        criadas, emAndamento,
+        mensagem: `${criadas} rodada(s) futuras trazidas para o seu bolão.${aviso}`,
+      });
     }
     return res.status(200).json({
-      criadas: 0,
+      criadas: 0, emAndamento,
       mensagem: motivo === 'o bolão já tem rodadas'
-        ? 'Suas rodadas já estão em dia. Novos jogos entram automaticamente todos os dias.'
-        : `Nenhuma rodada foi trazida: ${motivo}.`,
+        ? `Suas rodadas já estão em dia — novos jogos entram automaticamente todos os dias.${aviso}`
+        : `Nenhuma rodada nova: ${motivo}.${aviso}`,
     });
   } catch (err) {
     console.error('rounds/sync:', err.message);
