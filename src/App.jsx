@@ -855,11 +855,14 @@ const LoginScreen = ({ setView }) => {
           <span className="font-display text-white text-base" style={{ letterSpacing: '0.2em' }}>BOLÃO BRASILEIRÃO</span>
         </div>
         <div className="flex-1 flex flex-col justify-center py-12">
-          <p className="text-campo-400 text-xs font-semibold uppercase mb-5" style={{ letterSpacing: '0.28em' }}>Campeonato Brasileiro</p>
+          <p className="text-campo-400 text-xs font-semibold uppercase mb-5" style={{ letterSpacing: '0.28em' }}>Você está entrando no bolão</p>
+          {/* O nome do bolão é o destaque: com cada bolão num endereço próprio, é
+              a única coisa que diz à pessoa se ela está no lugar certo. */}
           <h1 className="font-display leading-none">
-            <span className="block text-white" style={{ fontSize: 'clamp(72px, 10vw, 120px)' }}>BOLÃO</span>
-            <span className="block text-ouro-500" style={{ fontSize: 'clamp(48px, 7vw, 80px)' }}>BRASILEIRÃO</span>
-            <span className="block text-noite-600" style={{ fontSize: 'clamp(28px, 4vw, 44px)', marginTop: '4px' }}>2026 — SÉRIE A</span>
+            <span className="block text-ouro-500 break-words" style={{ fontSize: 'clamp(40px, 6.5vw, 76px)' }}>
+              {settings?.brandName?.trim() || 'BOLÃO BRASILEIRÃO'}
+            </span>
+            <span className="block text-noite-600" style={{ fontSize: 'clamp(24px, 3.4vw, 38px)', marginTop: '8px' }}>BRASILEIRÃO 2026 — SÉRIE A</span>
           </h1>
           <p className="text-noite-500 text-sm mt-8 max-w-xs leading-relaxed font-medium">
             Faça seus palpites rodada a rodada e concorra a prêmios. A maior competição de bolão do futebol brasileiro.
@@ -887,6 +890,15 @@ const LoginScreen = ({ setView }) => {
           </div>
 
           <div className="mb-8">
+            {/* Repetido aqui porque no celular o painel da esquerda não aparece. */}
+            <div className="rounded-xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 px-4 py-3 mb-4">
+              <p className="text-[11px] font-semibold uppercase text-noite-500" style={{ letterSpacing: '0.14em' }}>
+                Bolão
+              </p>
+              <p className="font-display text-lg text-noite-900 break-words" style={{ letterSpacing: '0.02em' }}>
+                {settings?.brandName?.trim() || 'Bolão Brasileirão'}
+              </p>
+            </div>
             <h2 className="font-display text-5xl text-noite-900" style={{ letterSpacing: '0.04em' }}>ENTRAR</h2>
             <p className="text-noite-400 text-sm mt-1.5">Acesse sua conta para fazer seus palpites</p>
           </div>
