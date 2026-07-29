@@ -674,6 +674,85 @@ export const PlataformaTab = () => {
   );
 };
 
+// Pop-up de reativação, mostrado ao abrir o painel bloqueado.
+//
+// O aviso e o botão já existiam na tela, mas exigiam que o organizador
+// procurasse. Com o bolão parado e os participantes cobrando, o caminho de
+// voltar a funcionar tem que estar na frente dele, não a dois cliques.
+const ModalBloqueio = ({ tenantId, aoFechar }) => {
+  const [pix, setPix] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [erro, setErro] = useState('');
+  const [copiado, setCopiado] = useState(false);
+
+  const gerar = async () => {
+    setBusy(true); setErro('');
+    try {
+      const idToken = await getIdToken();
+      const res = await fetch('/api/billing/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, tenantId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Não foi possível gerar a cobrança');
+      setPix(d);
+    } catch (e) { setErro(e.message); } finally { setBusy(false); }
+  };
+
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(pix.brCode); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch {}
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-lg w-full shadow-modal my-auto p-7">
+        <div className="text-center">
+          <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle size={28} className="text-red-600" />
+          </div>
+          <h2 className="font-display text-2xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>
+            SEU BOLÃO ESTÁ PARADO
+          </h2>
+          <p className="text-sm text-noite-500 leading-relaxed mb-5">
+            Enquanto a mensalidade estiver em aberto, você não abre rodadas e seus
+            participantes não conseguem palpitar. Pague o PIX abaixo e a liberação
+            é <strong>imediata</strong>, assim que o banco confirmar.
+          </p>
+        </div>
+
+        {erro && <p className="text-sm text-red-600 mb-3 text-center">{erro}</p>}
+
+        {!pix ? (
+          <button onClick={gerar} disabled={busy}
+            className="w-full py-3.5 rounded-xl font-semibold text-[#0a0f1a] bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60">
+            {busy ? <Loader2 size={18} className="animate-spin" /> : <DollarSign size={18} />}
+            {busy ? 'Gerando cobrança...' : 'Gerar PIX e reativar meu bolão'}
+          </button>
+        ) : (
+          <div className="flex flex-col items-center gap-4 border-t pt-5">
+            {pix.qrCodeImage && <img src={pix.qrCodeImage} alt="QR Code do PIX" className="w-48 h-48 bg-[#ffffff] rounded-xl p-2" />}
+            <div className="w-full">
+              <p className="text-sm font-semibold text-noite-800 mb-2 text-center">
+                Escaneie o QR Code ou copie o código:
+              </p>
+              <textarea readOnly value={pix.brCode || ''} rows={3} onFocus={(e) => e.target.select()}
+                className="w-full text-xs font-mono p-2 rounded-lg border bg-[#ffffff] text-[#0a0f1a] resize-none" />
+              <button onClick={copiar} className="v2-btn-outline w-full py-2.5 text-sm mt-2">
+                <Copy size={15} /> {copiado ? 'Copiado!' : 'Copiar código PIX'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <button onClick={aoFechar} className="w-full text-sm text-noite-400 hover:text-noite-700 mt-5">
+          Ver o painel assim mesmo
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const SubscriptionBanner = ({ onStatus }) => {
   const { tenantId, currentUser } = useApp();
   const [sub, setSub] = useState(null);
@@ -1455,6 +1534,9 @@ const AdminPanel = ({ setView }) => {
   
   const [activeTab, setActiveTab] = useState('financial');
   const [subStatus, setSubStatus] = useState(null);
+  // Só para a sessão atual: recarregar traz o aviso de volta, porque o bolão
+  // segue parado e o organizador precisa lembrar disso.
+  const [bloqueioDispensado, setBloqueioDispensado] = useState(false);
 
   // Tour de primeira execução. A marca fica no navegador porque é preferência
   // de interface, não dado do bolão — e assim não custa escrita no Firestore
@@ -4014,7 +4096,12 @@ const AdminPanel = ({ setView }) => {
   return (
     <div className="min-h-screen font-body flex page-bg">
 
-      {mostrarWizard && <SetupWizard aoFechar={encerrarWizard} />}
+      {/* Bloqueio tem prioridade sobre o assistente: sem pagar, não há o que
+          configurar. */}
+      {subStatus === STATUS.BLOCKED && !bloqueioDispensado && (
+        <ModalBloqueio tenantId={tenantId} aoFechar={() => setBloqueioDispensado(true)} />
+      )}
+      {mostrarWizard && subStatus !== STATUS.BLOCKED && <SetupWizard aoFechar={encerrarWizard} />}
       {mostrarTour && (
         <GuidedTour passos={PASSOS_TOUR} aoTrocarAba={setActiveTab} aoFechar={encerrarTour} />
       )}
