@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
+import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
