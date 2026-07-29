@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  STATUS, TRIAL_DAYS, GRACE_DAYS,
-  trialSubscription, evaluateStatus, accessEndsAt, isBlocked, daysUntil,
+  STATUS, TRIAL_DAYS, GRACE_DAYS, PERIOD_DAYS,
+  trialSubscription, evaluateStatus, accessEndsAt, isBlocked, daysUntil, renewedPeriodEnd,
 } from '../api/_shared/subscription.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -68,5 +68,32 @@ describe('assinatura do SaaS', () => {
   it('tenant sem assinatura gravada nao e tratado como bloqueado', () => {
     expect(evaluateStatus(null, T0)).toBe(STATUS.TRIAL);
     expect(isBlocked(undefined, T0)).toBe(false);
+  });
+});
+
+describe('renovacao ao confirmar pagamento', () => {
+  it('quem paga adiantado soma ao tempo que ainda tem', () => {
+    const sub = { ...trialSubscription(T0), currentPeriodEnd: T0 + 10 * DAY };
+    // Paga faltando 10 dias: ganha 30 a partir do vencimento, nao de hoje.
+    expect(renewedPeriodEnd(sub, T0)).toBe(T0 + 10 * DAY + PERIOD_DAYS * DAY);
+  });
+
+  it('quem paga atrasado comeca a contar de hoje', () => {
+    const sub = { ...trialSubscription(T0), currentPeriodEnd: T0 - 20 * DAY };
+    // Nao pode receber um mes que ja venceu.
+    expect(renewedPeriodEnd(sub, T0)).toBe(T0 + PERIOD_DAYS * DAY);
+  });
+
+  it('quem esta no teste soma ao fim do teste', () => {
+    const sub = trialSubscription(T0);
+    expect(renewedPeriodEnd(sub, T0)).toBe(sub.trialEndsAt + PERIOD_DAYS * DAY);
+  });
+
+  it('renovar tira do bloqueio', () => {
+    const sub = trialSubscription(T0);
+    const tarde = sub.trialEndsAt + 30 * DAY;
+    expect(evaluateStatus(sub, tarde)).toBe(STATUS.BLOCKED);
+    const renovado = { ...sub, currentPeriodEnd: renewedPeriodEnd(sub, tarde) };
+    expect(evaluateStatus(renovado, tarde)).toBe(STATUS.ACTIVE);
   });
 });

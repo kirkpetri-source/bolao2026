@@ -1,7 +1,9 @@
 // Assinatura do SaaS: o organizador paga a Lion Tech pelo uso da plataforma.
 // Não confundir com api/payments/woovi-*, que é a aposta do participante indo
 // para a conta do próprio organizador.
-import { getAdminDb } from './firebaseAdmin.js';
+//
+// Módulo sem dependências: o painel importa daqui para exibir os dias restantes,
+// então a regra de quando bloquear vive num lugar só e não é reescrita no front.
 
 export const TRIAL_DAYS = 7;
 export const PRICE_CENTS = 4990;        // R$ 49,90
@@ -55,7 +57,13 @@ export function daysUntil(ms, now = Date.now()) {
   return Math.ceil((Number(ms || 0) - now) / DAY_MS);
 }
 
-export async function getTenantSubscription(tenantId) {
-  const snap = await getAdminDb().collection('tenants').doc(tenantId).get();
-  return snap.exists ? (snap.data().subscription || null) : null;
+export const PERIOD_DAYS = 30;
+
+// Novo fim de período ao confirmar um pagamento. Quem paga adiantado soma ao
+// tempo que ainda tem; quem paga atrasado começa a contar de hoje, para não
+// levar um mês já vencido.
+export function renewedPeriodEnd(sub, now = Date.now()) {
+  const base = Math.max(now, accessEndsAt(sub) || 0);
+  return base + PERIOD_DAYS * DAY_MS;
 }
+

@@ -204,6 +204,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Índice de unicidade de e-mail do organizador: só o Admin SDK escreve, e
+    // ninguém lista (a coleção mapearia e-mails de todos os clientes).
+    match /email_index/{doc} {
+      allow read, write: if false;
+    }
+
     // Qualquer coleção não declarada acima fica bloqueada por padrão.
     match /{document=**} {
       allow read, write: if false;

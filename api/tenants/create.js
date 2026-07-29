@@ -12,6 +12,12 @@ function normWpp(s) {
   return d.length > 11 ? d.slice(-11) : d;
 }
 
+// Id de documento derivado do e-mail: minúsculo, sem barra e dentro do limite
+// de 1500 bytes do Firestore.
+function emailKey(email) {
+  return String(email).toLowerCase().replace(/[^a-z0-9@._+-]/g, '_').slice(0, 200);
+}
+
 function slugify(name) {
   return String(name || '')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -80,6 +86,14 @@ export default async function handler(req, res) {
 
     try {
       const batch = db.batch();
+      // Índice de unicidade do e-mail. batch.create falha se o doc já existir,
+      // então duas criações simultâneas com o mesmo e-mail não passam as duas —
+      // uma consulta antes do commit deixaria essa brecha aberta.
+      // (O WhatsApp já é único: vira o e-mail sintético da conta no Auth.)
+      batch.create(db.collection('email_index').doc(emailKey(email)), {
+        uid, tenantId: slug, email,
+        createdAt: FieldValue.serverTimestamp(),
+      });
       batch.set(db.collection('users').doc(uid), {
         name, whatsapp, email, isAdmin: false, balance: 0,
         lastTenantId: slug,
@@ -124,6 +138,9 @@ export default async function handler(req, res) {
     } catch (e) {
       // Não deixa conta órfã se a gravação falhar.
       try { await getAdminAuth().deleteUser(uid); } catch {}
+      if (e?.code === 6 || e?.code === 'already-exists' || /already exists/i.test(e?.message || '')) {
+        return res.status(409).json({ error: 'Este e-mail já está cadastrado. Use outro ou entre na conta existente.' });
+      }
       throw e;
     }
 

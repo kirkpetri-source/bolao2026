@@ -1,0 +1,97 @@
+// Webhook da conta Woovi da LION TECH — confirma a mensalidade e devolve o
+// bolão para ativo. Separado de api/payments/woovi-webhook.js porque aquele
+// atende a conta de cada organizador, e são credenciais diferentes.
+import axios from 'axios';
+import { getAdminDb, FieldValue } from '../_shared/firebaseAdmin.js';
+import { getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
+import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
+import { STATUS, renewedPeriodEnd, trialSubscription } from '../_shared/subscription.js';
+
+// Confere na API em vez de confiar no corpo do webhook: qualquer um consegue
+// fazer um POST aqui, mas ninguém forja um pagamento aprovado na Woovi.
+async function confirmarNaWoovi(correlationID, appId) {
+  try {
+    const r = await axios.get(`https://api.woovi.com/api/v1/charge/${encodeURIComponent(correlationID)}`, {
+      headers: { Authorization: appId },
+      timeout: 8000,
+    });
+    return r.data?.charge?.status === 'COMPLETED';
+  } catch (err) {
+    console.error('billing/webhook: falha ao confirmar na Woovi:', err.message);
+    return false;
+  }
+}
+
+export default async function handler(req, res) {
+  // Sempre 200: a Woovi reenvia indefinidamente diante de erro, e um bug nosso
+  // não deve virar uma fila de reentregas.
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+  try {
+    const event = req.body || {};
+    const tipo = event.event || event.type;
+    if (!['OPENPIX:CHARGE_COMPLETED', 'CHARGE_COMPLETED'].includes(tipo)) {
+      return res.status(200).json({ received: true });
+    }
+
+    const correlationID = event.charge?.correlationID || '';
+    // Formato gravado em billing/subscribe: assinatura_{tenantId}_{timestamp}
+    const m = /^assinatura_(.+)_\d{13}$/.exec(correlationID);
+    if (!m) {
+      console.log('billing/webhook: correlationID fora do padrão de assinatura:', correlationID);
+      return res.status(200).json({ received: true });
+    }
+    const tenantId = m[1];
+
+    const appId = (process.env.LIONTECH_WOOVI_APP_ID || '').trim();
+    if (!appId || !(await confirmarNaWoovi(correlationID, appId))) {
+      console.error('billing/webhook: pagamento não confirmado:', correlationID);
+      return res.status(200).json({ received: true });
+    }
+
+    const db = getAdminDb();
+    const ref = db.collection('tenants').doc(tenantId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      console.error('billing/webhook: bolão inexistente:', tenantId);
+      return res.status(200).json({ received: true });
+    }
+
+    const tenant = snap.data();
+    const sub = tenant.subscription || trialSubscription();
+
+    // Reentrega da mesma cobrança não pode somar outro mês.
+    if (sub.lastChargeId === correlationID) {
+      return res.status(200).json({ received: true, jaProcessado: true });
+    }
+
+    const novoFim = renewedPeriodEnd(sub);
+    await ref.update({
+      'subscription.status': STATUS.ACTIVE,
+      'subscription.currentPeriodEnd': novoFim,
+      'subscription.lastChargeId': correlationID,
+      'subscription.pendingChargeId': null,
+      'subscription.blockedAt': null,
+      'subscription.lastNotifiedAt': null,
+      plan: 'ativo',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    const destino = formatPhone(tenant.ownerWhatsapp || '');
+    if (destino) {
+      const ate = new Date(novoFim).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const texto = `✅ *Assinatura confirmada!*\n\nO ${tenant.name || 'seu bolão'} está ativo até ${ate}.\n\nObrigado!`;
+      try {
+        await sendWhatsApp(destino, texto, await getSettings(DEFAULT_TENANT_ID));
+      } catch (e) {
+        console.error('billing/webhook: WhatsApp falhou:', e.message);
+      }
+    }
+
+    console.log(`billing/webhook: ${tenantId} ativo até ${new Date(novoFim).toISOString()}`);
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('billing/webhook:', err.message);
+    return res.status(200).json({ received: true });
+  }
+}

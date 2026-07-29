@@ -10,6 +10,121 @@ import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
+import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
+
+// Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
+// e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
+// isto aqui é o aviso e o caminho para pagar.
+const SubscriptionBanner = () => {
+  const { tenantId, currentUser } = useApp();
+  const [sub, setSub] = useState(null);
+  const [pix, setPix] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [erro, setErro] = useState('');
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'tenants', tenantId));
+        if (vivo && snap.exists()) setSub(snap.data().subscription || null);
+      } catch { /* sem permissão ou offline: o banner some, o painel segue */ }
+    })();
+    return () => { vivo = false; };
+  }, [tenantId]);
+
+  // O bolão da própria plataforma não se cobra.
+  if (!sub || currentUser?.globalAdmin) return null;
+
+  const status = evaluateStatus(sub);
+  if (status === STATUS.ACTIVE) return null;
+
+  const faltam = daysUntil(accessEndsAt(sub));
+  const valor = ((Number(sub.priceCents) || 0) / 100).toFixed(2).replace('.', ',');
+
+  const tom = status === STATUS.BLOCKED
+    ? { caixa: 'bg-red-50 border-red-300', titulo: 'text-red-800', texto: 'text-red-700' }
+    : status === STATUS.OVERDUE
+      ? { caixa: 'bg-orange-50 border-orange-300', titulo: 'text-orange-800', texto: 'text-orange-700' }
+      : { caixa: 'bg-ouro-50 border-ouro-500', titulo: 'text-noite-900', texto: 'text-noite-600' };
+
+  const titulo = status === STATUS.BLOCKED
+    ? 'Bolão bloqueado por falta de pagamento'
+    : status === STATUS.OVERDUE
+      ? 'Mensalidade vencida'
+      : faltam <= 0 ? 'Seu teste termina hoje' : `Faltam ${faltam} dia(s) de teste`;
+
+  const detalhe = status === STATUS.BLOCKED
+    ? 'Os participantes não conseguem enviar palpites até a regularização.'
+    : status === STATUS.OVERDUE
+      ? 'Regularize para o bolão não ser bloqueado.'
+      : 'Ative a assinatura para o bolão continuar no ar quando o teste acabar.';
+
+  const pagar = async () => {
+    setBusy(true); setErro('');
+    try {
+      const idToken = await getIdToken();
+      const res = await fetch('/api/billing/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, tenantId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Não foi possível gerar a cobrança');
+      setPix(data);
+    } catch (e) {
+      setErro(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(pix.brCode);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch { /* navegador sem clipboard: o código fica visível para copiar à mão */ }
+  };
+
+  return (
+    <div className={`border-2 rounded-xl p-4 mb-5 ${tom.caixa}`}>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+        <div className="flex items-start gap-3">
+          <AlertCircle size={20} className={tom.titulo} />
+          <div>
+            <p className={`font-bold ${tom.titulo}`}>{titulo}</p>
+            <p className={`text-sm ${tom.texto}`}>{detalhe} R$ {valor}/mês.</p>
+          </div>
+        </div>
+        {!pix && (
+          <button onClick={pagar} disabled={busy}
+            className="px-5 py-2.5 rounded-lg font-semibold text-noite-900 bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 flex-shrink-0">
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
+            {busy ? 'Gerando...' : 'Ativar meu bolão'}
+          </button>
+        )}
+      </div>
+
+      {erro && <p className="text-sm text-red-700 mt-3">{erro}</p>}
+
+      {pix && (
+        <div className="mt-4 pt-4 border-t border-black/10 flex flex-col sm:flex-row gap-5 items-center">
+          {pix.qrCodeImage && <img src={pix.qrCodeImage} alt="QR Code do PIX" className="w-44 h-44 bg-white rounded-xl p-2" />}
+          <div className="flex-1 w-full">
+            <p className="text-sm font-semibold text-noite-800 mb-2">Pague o PIX para ativar. A liberação é automática.</p>
+            <textarea readOnly value={pix.brCode || ''} rows={3}
+              className="w-full text-xs font-mono p-2 rounded-lg border border-black/10 bg-white/70 resize-none" />
+            <button onClick={copiar} className="mt-2 px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2 bg-white">
+              <Copy size={14} /> {copiado ? 'Copiado!' : 'Copiar código PIX'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Conexão do WhatsApp do bolão via QR Code (Evolution multi-instância).
 // O organizador escaneia o QR com o próprio número; conectado, os envios
@@ -3211,6 +3326,7 @@ const AdminPanel = ({ setView }) => {
 
         {/* Content */}
         <div className="p-4 sm:p-6 flex-1">
+        <SubscriptionBanner />
         {activeTab === 'dashboard' && (
           <div>
             <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-6">
