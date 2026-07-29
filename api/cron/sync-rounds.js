@@ -1,9 +1,24 @@
-import { db } from '../_shared/firebase.js';
+import { db, getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
 import { getRoundFixtures, normalizeName } from '../services/footballApi.js';
 import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
 import { listTenants } from '../_shared/tenant.js';
 
 const TOTAL_ROUNDS = 38;
+
+// TheSportsDB usa textos livres: "Postponed", "Match Postponed", "PPD", e
+// tambem "Cancelled"/"Abandoned" para jogos que nao serao concluidos.
+export function ehAdiado(status) {
+  const s = String(status || '').toLowerCase();
+  return /postpon|adiad|ppd|cancel|abandon|suspend/.test(s);
+}
+
+// Quantas horas a data mudou entre o que estava gravado e o que a API diz.
+export function horasDeDiferenca(antes, depois) {
+  const a = new Date(antes || 0).getTime();
+  const d = new Date(depois || 0).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(d) || !antes || !depois) return 0;
+  return Math.abs(d - a) / 36e5;
+}
 
 function findTeamId(teamNormalized, teamsMap) {
   if (teamsMap[teamNormalized]) return teamsMap[teamNormalized];
@@ -26,6 +41,7 @@ export default async function handler(req, res) {
 
   const forceRound = req.query.round ? parseInt(req.query.round, 10) : null;
   const logs = [];
+  const alteracoes = [];
 
   try {
     // Carregar times do Firestore para resolver IDs (catálogo global)
@@ -47,7 +63,32 @@ export default async function handler(req, res) {
       byTenant[data.tenantId][n] = { id: d.id, ...data };
     });
 
-    const roundsToSync = forceRound ? [forceRound] : Array.from({ length: TOTAL_ROUNDS }, (_, i) => i + 1);
+    // Modo "proximas": varre so as rodadas que ainda podem mudar de data — as
+    // que estao abertas ou por vir nas proximas 2 semanas. E o que permite
+    // rodar de hora em hora sem estourar o limite da API, porque data de jogo
+    // muda no meio do dia e uma varredura diaria descobria tarde demais.
+    const soProximas = req.query?.near === '1';
+    let roundsToSync;
+    if (forceRound) {
+      roundsToSync = [forceRound];
+    } else if (soProximas) {
+      const limite = Date.now() + 14 * 24 * 60 * 60 * 1000;
+      const numeros = new Set();
+      roundsSnap.docs.forEach(d => {
+        const r = d.data();
+        if (!['upcoming', 'open', 'closed'].includes(r.status)) return;
+        const n = r.apiRoundNumber || r.number;
+        if (!n) return;
+        const datas = (r.matches || []).map(m => new Date(m.date).getTime()).filter(Number.isFinite);
+        // Inclui rodada ja fechada cujo jogo ainda nao aconteceu: e exatamente
+        // o caso do adiamento, que so aparece depois do fechamento.
+        if (datas.some(t => t <= limite && t >= Date.now() - 7 * 24 * 60 * 60 * 1000)) numeros.add(n);
+      });
+      roundsToSync = [...numeros].sort((a, b) => a - b);
+      logs.push(`Modo próximas: ${roundsToSync.length} rodada(s) — ${roundsToSync.join(', ') || 'nenhuma'}`);
+    } else {
+      roundsToSync = Array.from({ length: TOTAL_ROUNDS }, (_, i) => i + 1);
+    }
     let created = 0, updated = 0, errors = 0;
 
     for (const roundNum of roundsToSync) {
@@ -73,7 +114,12 @@ export default async function handler(req, res) {
             date: f.date,
             homeScore: f.homeScore,
             awayScore: f.awayScore,
-            finished: f.finished
+            finished: f.finished,
+            // Sem guardar o status, um jogo adiado fica indistinguivel de um
+            // que ainda vai acontecer: nunca ganha placar, nunca "termina", e
+            // a rodada fica em andamento para sempre.
+            apiStatus: f.status || null,
+            postponed: ehAdiado(f.status),
           };
         });
 
@@ -104,20 +150,62 @@ export default async function handler(req, res) {
           // e histórico vazio sem palpites.
           if (!existing && smartStatus === 'closed') continue;
           if (existing) {
-            // Atualiza apenas se a rodada ainda não foi finalizada
-            if (['upcoming', 'open'].includes(existing.status)) {
-              // Aplica smartStatus se a rodada está 'upcoming' mas deveria estar 'open' ou 'closed'
-              const statusUpdate = existing.status === 'upcoming' && smartStatus !== 'upcoming'
-                ? { status: smartStatus, notificacaoAberturaEnviada: smartStatus !== 'upcoming', alertaFaltando1hEnviado: smartStatus === 'closed' }
-                : {};
+            // O que mudou de data desde a ultima sincronizacao. Precisa ser
+            // detectado ANTES de sobrescrever os jogos, senao a mudanca some.
+            const anteriores = {};
+            (existing.matches || []).forEach(m => { anteriores[m.apiEventId || m.id] = m; });
+            const mudancas = [];
+            for (const m of matches) {
+              const antes = anteriores[m.apiEventId || m.id];
+              if (!antes) continue;
+              const horas = horasDeDiferenca(antes.date, m.date);
+              const virouAdiado = m.postponed && !antes.postponed;
+              if (horas >= 1 || virouAdiado) {
+                mudancas.push({ jogo: `${m.homeTeamName} x ${m.awayTeamName}`, horas, adiado: !!m.postponed, de: antes.date, para: m.date });
+              }
+            }
+
+            // Rodada finalizada nao se mexe. Ja a FECHADA continua sendo
+            // atualizada de propósito: adiamento costuma ser anunciado depois
+            // do fechamento, e sem isso o sistema nunca saberia da nova data.
+            const podeAtualizar = ['upcoming', 'open', 'closed'].includes(existing.status);
+            if (podeAtualizar) {
+              let statusUpdate = {};
+              if (existing.status === 'upcoming' && smartStatus !== 'upcoming') {
+                statusUpdate = { status: smartStatus, notificacaoAberturaEnviada: smartStatus !== 'upcoming', alertaFaltando1hEnviado: smartStatus === 'closed' };
+              } else if (existing.status === 'closed' && smartStatus === 'open') {
+                // Todos os jogos foram adiados para o futuro: a rodada volta a
+                // aceitar palpite. So acontece quando NENHUM jogo comecou —
+                // smartStatus so devolve 'open' se o primeiro jogo ainda vem.
+                statusUpdate = { status: 'open', notificacaoFechamentoEnviada: false, alertaFaltando1hEnviado: false };
+                logs.push(`[${tenant.id}] Rodada ${roundNum} REABERTA: todos os jogos foram remarcados`);
+              }
+
+              // Nao sobrescreve placar ja apurado com o que a TheSportsDB
+              // devolve — quem manda no placar e o sync-scores.
+              const mesclados = matches.map(m => {
+                const antes = anteriores[m.apiEventId || m.id];
+                if (!antes) return m;
+                const manterPlacar = antes.finished || antes.homeScore != null;
+                return manterPlacar
+                  ? { ...m, homeScore: antes.homeScore, awayScore: antes.awayScore, finished: antes.finished, matchStatus: antes.matchStatus }
+                  : m;
+              });
+
               await updateDoc(doc(db, 'rounds', existing.id), {
-                matches,
+                matches: mesclados,
                 closeAt,
                 autoSyncedAt: serverTimestamp(),
+                ...(mudancas.length ? { ultimaMudancaDeData: { em: new Date().toISOString(), jogos: mudancas } } : {}),
                 ...statusUpdate
               });
               updated++;
-              logs.push(`[${tenant.id}] Rodada ${roundNum} atualizada`);
+              if (mudancas.length) {
+                alteracoes.push({ tenantId: tenant.id, roundNum, mudancas });
+                logs.push(`[${tenant.id}] Rodada ${roundNum}: ${mudancas.length} jogo(s) com data alterada`);
+              } else {
+                logs.push(`[${tenant.id}] Rodada ${roundNum} atualizada`);
+              }
             }
           } else {
             await addDoc(collection(db, 'rounds'), {
@@ -149,8 +237,39 @@ export default async function handler(req, res) {
       }
     }
 
-    logs.push(`Resumo: Tenants=${tenants.length} | Criadas=${created} | Atualizadas=${updated} | Erros=${errors}`);
-    return res.status(200).json({ success: true, logs });
+    // Avisa o organizador: mudanca de data quebra a expectativa de quem ja
+    // palpitou, e ele precisa saber antes dos participantes reclamarem.
+    const porTenant = {};
+    for (const a of alteracoes) (porTenant[a.tenantId] = porTenant[a.tenantId] || []).push(a);
+    for (const [tid, itens] of Object.entries(porTenant)) {
+      try {
+        const settings = await getSettings(tid);
+        const destino = formatPhone(settings?.whatsapp?.number || '');
+        if (!destino) continue;
+        const linhas = itens.flatMap(i => i.mudancas.map(m => {
+          const quando = m.para ? new Date(m.para).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'sem data';
+          return m.adiado
+            ? `• R${i.roundNum} — ${m.jogo}: ADIADO`
+            : `• R${i.roundNum} — ${m.jogo}: agora ${quando}`;
+        }));
+        const texto = [
+          '📅 *Mudança na tabela*',
+          '',
+          'A CBF remarcou jogo(s) do seu bolão:',
+          '',
+          ...linhas,
+          '',
+          'O sistema já ajustou o horário de fechamento das rodadas afetadas.',
+        ].join(String.fromCharCode(10));
+        await sendWhatsApp(destino, texto, settings);
+        logs.push(`[${tid}] Organizador avisado sobre ${linhas.length} mudança(s)`);
+      } catch (e) {
+        logs.push(`[${tid}] Falha ao avisar sobre mudança de data: ${e.message}`);
+      }
+    }
+
+    logs.push(`Resumo: Tenants=${tenants.length} | Criadas=${created} | Atualizadas=${updated} | Erros=${errors} | Mudanças de data=${alteracoes.length}`);
+    return res.status(200).json({ success: true, logs, alteracoes });
   } catch (err) {
     console.error('sync-rounds error:', err);
     return res.status(500).json({ error: 'Internal Server Error', message: err.message });

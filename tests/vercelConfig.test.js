@@ -42,8 +42,16 @@ describe('vercel.json', () => {
 
   it('os crons apontam para rotas existentes', () => {
     for (const c of cfg.crons || []) {
-      const arquivo = path.resolve(__dirname, '..', c.path.replace(/^\//, '') + '.js');
+      // A Vercel aceita query string no caminho do cron (é assim que o mesmo
+      // endpoint roda em dois modos), então ela não faz parte do arquivo.
+      const rota = c.path.split('?')[0];
+      const arquivo = path.resolve(__dirname, '..', rota.replace(/^\//, '') + '.js');
       expect(fs.existsSync(arquivo), `${c.path} sem arquivo em ${arquivo}`).toBe(true);
     }
+  });
+
+  it('nao agenda dois crons no mesmo horario e rota', () => {
+    const chaves = (cfg.crons || []).map(c => `${c.path}@${c.schedule}`);
+    expect(new Set(chaves).size).toBe(chaves.length);
   });
 });
