@@ -1,36 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { Trophy, Medal, Users, Calendar, Star } from 'lucide-react';
-
-// ─── Firebase (mesmo projeto do App.jsx) ────────────────────────────────────
-const firebaseConfig = {
-  apiKey: 'AIzaSyCDEbEF3wQQck2bbIZfW1tCNROJzJ39cXQ',
-  authDomain: 'bolao-brasileirao-dev-kd.firebaseapp.com',
-  projectId: 'bolao-brasileirao-dev-kd',
-  storageBucket: 'bolao-brasileirao-dev-kd.firebasestorage.app',
-  messagingSenderId: '1084218540237',
-  appId: '1:1084218540237:web:3e9b1d8d194a2e93472984'
-};
-const fbApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-const db = getFirestore(fbApp);
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-function calcPoints(ph, pa, rh, ra) {
-  if (rh == null || ra == null) return 0;
-  if (ph === rh && pa === ra) return 3;
-  const pr = ph > pa ? 'H' : ph < pa ? 'A' : 'D';
-  const mr = rh > ra ? 'H' : rh < ra ? 'A' : 'D';
-  return pr === mr ? 1 : 0;
-}
-
-function fmtBRL(n) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
-}
-
-function getSafeLogo(name) {
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || '?')}&background=ffffff&color=0f172a&size=64`;
-}
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function RankingPublico({ roundId }) {
@@ -42,55 +11,12 @@ export default function RankingPublico({ roundId }) {
 
     async function load() {
       try {
-        // 1. Rodada
-        const roundSnap = await getDoc(doc(db, 'rounds', roundId));
-        if (!roundSnap.exists()) throw new Error('Rodada não encontrada.');
-        const round = { id: roundSnap.id, ...roundSnap.data() };
-        if (round.status !== 'finished') throw new Error('O resultado desta rodada ainda não foi apurado.');
-
-        // 2. Settings (betValue)
-        const settingsSnap = await getDocs(collection(db, 'settings'));
-        const settings = settingsSnap.empty ? {} : settingsSnap.docs[0].data();
-        const betValue = settings?.betValue || 15;
-
-        // 3. Usuários (só name)
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const nameMap = {};
-        usersSnap.docs.forEach(d => { if (!d.data().isAdmin) nameMap[d.id] = d.data().name || 'Participante'; });
-
-        // 4. Palpites pagos desta rodada
-        const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', roundId)));
-
-        // 5. Agrupar por cartela e calcular pontos
-        const cartelas = {};
-        predsSnap.docs.forEach(d => {
-          const p = d.data();
-          if (!p.paid) return;
-          const code = p.cartelaCode || 'ANTIGA';
-          const key = `${p.userId}__${code}`;
-          if (!cartelas[key]) cartelas[key] = { userId: p.userId, cartelaCode: code, preds: [] };
-          cartelas[key].preds.push(p);
-        });
-
-        const ranking = Object.values(cartelas).map(c => {
-          let pts = 0;
-          for (const pred of c.preds) {
-            const match = round.matches?.find(m => m.id === pred.matchId);
-            if (!match || match.homeScore == null || match.awayScore == null) continue;
-            pts += calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
-          }
-          return { userId: c.userId, name: nameMap[c.userId] || 'Participante', cartelaCode: c.cartelaCode, points: pts };
-        }).sort((a, b) => b.points - a.points);
-
-        // 6. Prêmio
-        const totalPaid = ranking.length * betValue;
-        const prizePool = totalPaid * 0.85;
-        const maxPts = ranking[0]?.points ?? 0;
-        const winners = ranking.filter(r => r.points === maxPts);
-        const prizePerWinner = winners.length > 0 ? prizePool / winners.length : 0;
-        const prize = { totalPaid, prizePool, prizePerWinner, winners };
-
-        if (!cancelled) setState({ status: 'ok', round, ranking, prize, error: null });
+        // Tudo vem de um endpoint: a página é pública e o Firestore, com razão,
+        // não entrega usuários, palpites e configurações a visitante sem login.
+        const r = await fetch(`/api/ranking/public?roundId=${encodeURIComponent(roundId)}`);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Não foi possível carregar o resultado.');
+        if (!cancelled) setState({ status: 'ok', round: d.round, ranking: d.ranking, prize: d.prize, error: null });
       } catch (err) {
         if (!cancelled) setState(s => ({ ...s, status: 'error', error: err.message }));
       }

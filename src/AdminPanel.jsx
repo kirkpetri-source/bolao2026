@@ -5108,9 +5108,13 @@ const AdminPanel = ({ setView }) => {
           <div>
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
               <h2 className="text-2xl font-bold">Participantes</h2>
-              <button onClick={handleFixUserDuplicates} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm sm:text-base w-full sm:w-auto justify-center">
-                <CheckCircle size={20} /> Corrigir duplicados
-              </button>
+              {/* Varre a coleção global de usuários: é manutenção da
+                  plataforma, e o dono de um bolão nem tem permissão para isso. */}
+              {currentUser?.globalAdmin && (
+                <button onClick={handleFixUserDuplicates} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm sm:text-base w-full sm:w-auto justify-center">
+                  <CheckCircle size={20} /> Corrigir duplicados
+                </button>
+              )}
             </div>
             <div className="grid gap-4">
               {users.filter(u => !u.isAdmin).map((user) => {

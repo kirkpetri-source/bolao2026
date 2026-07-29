@@ -6,7 +6,7 @@ import axios from 'axios';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { db, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
-import { resolveTenantId, rememberTenant, publicConfigDocId } from './tenant.js';
+import { resolveTenantId, rememberTenant, publicConfigDocId, DEFAULT_TENANT_ID } from './tenant.js';
 import NovaVersao from './components/NovaVersao.jsx';
 import Plataforma from './Plataforma.jsx';
 import OnboardingScreen from './Onboarding.jsx';
@@ -20,12 +20,13 @@ import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAut
 
 const initializeDatabase = async (tenantId) => {
   try {
-    const usersSnapshot = await getDocs(collection(db, 'users'));
+    // Não lê /users: a coleção é global e sua varredura é (corretamente) negada
+    // ao dono de bolão. Times e configurações já dizem se falta inicializar.
     const teamsSnapshot = await getDocs(collection(db, 'teams'));
     const settingsSnapshot = await getDocs(query(collection(db, 'settings'), where('tenantId', '==', tenantId)));
-    
+
     // Se já há dados, não reinicializa
-    if (!usersSnapshot.empty && !teamsSnapshot.empty) {
+    if (!settingsSnapshot.empty && !teamsSnapshot.empty) {
       console.log('✅ Database initialized');
       return;
     }
@@ -308,9 +309,15 @@ const AppProvider = ({ children }) => {
           // plataforma: como ela enxerga tudo para dar suporte, abrir um bolão
           // de cliente por acidente mostrava o painel dele completo, com botões
           // de marcar pago e cobrar. Volta para o bolão próprio.
-          if (!role && data.lastTenantId && data.lastTenantId !== tid) {
-            const papelProprio = await papelEm(data.lastTenantId);
-            if (papelProprio) { tid = data.lastTenantId; role = papelProprio; }
+          if (!role) {
+            // Contas antigas não têm lastTenantId, então a busca não pode
+            // depender só dele — senão o dono de um bolão que caiu no bolão de
+            // outro vira participante comum, sem acesso ao painel dele.
+            for (const candidato of [data.lastTenantId, DEFAULT_TENANT_ID]) {
+              if (!candidato || candidato === tid) continue;
+              const papel = await papelEm(candidato);
+              if (papel) { tid = candidato; role = papel; break; }
+            }
           }
 
           if (tid !== tenantId) { setTenantId(tid); rememberTenant(tid); }
