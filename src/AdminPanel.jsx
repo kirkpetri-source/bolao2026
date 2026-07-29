@@ -12,9 +12,203 @@ import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTempl
 import { getIdToken, authErrorMessage } from './authService.js';
 import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
 
+// Liga/desliga o débito automático da mensalidade. Fica nas Configurações
+// porque é escolha permanente do organizador, não uma ação de cobrança.
+const RecorrenciaCard = () => {
+  const { tenantId, currentUser } = useApp();
+  const [sub, setSub] = useState(null);
+  const [doc_, setDoc_] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [erro, setErro] = useState('');
+
+  const carregar = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'tenants', tenantId));
+      if (snap.exists()) setSub(snap.data().subscription || null);
+    } catch { /* sem permissão: o card some */ }
+  };
+  useEffect(() => { carregar(); }, [tenantId]);
+
+  if (!sub || currentUser?.globalAdmin) return null;
+  const ligada = !!sub.recurring;
+
+  const alternar = async (ativar) => {
+    setBusy(true); setErro(''); setMsg('');
+    try {
+      const idToken = await getIdToken();
+      const res = await fetch('/api/billing/recurrence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, tenantId, enabled: ativar, taxID: doc_ }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detalhe || d.error || 'Não foi possível concluir');
+      setMsg(ativar
+        ? 'Recorrência ativada. Autorize o débito automático no aplicativo do seu banco quando a solicitação chegar.'
+        : 'Recorrência desligada. Você volta a pagar pelo botão a cada mês.');
+      await carregar();
+    } catch (e) { setErro(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border p-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-bold">Pagamento automático da mensalidade</h3>
+        <span className={`text-xs font-bold px-2 py-1 rounded-full ${ligada ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+          {ligada ? 'ATIVO' : 'DESLIGADO'}
+        </span>
+      </div>
+
+      <p className="text-sm text-gray-600 mb-4">
+        Com o débito automático você autoriza uma vez e a mensalidade é cobrada sozinha
+        todo mês, sem risco de o bolão travar por esquecimento. Desligado, você continua
+        pagando pelo botão no topo do painel a cada mês.
+      </p>
+
+      {!ligada && (
+        <div className="mb-4">
+          <label className="v2-label">CPF ou CNPJ do responsável</label>
+          <input type="text" placeholder="Somente números" value={doc_}
+            onChange={(e) => setDoc_(e.target.value)} className="v2-input" />
+          <p className="text-xs text-gray-400 mt-1">Exigido pelo banco para autorizar o débito automático.</p>
+        </div>
+      )}
+
+      {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
+      {msg && <p className="text-sm text-green-700 mb-3">{msg}</p>}
+
+      <button onClick={() => alternar(!ligada)} disabled={busy}
+        className={`px-5 py-2.5 rounded-lg text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-60 ${
+          ligada ? 'border border-red-300 text-red-600' : 'v2-btn-primary'}`}>
+        {busy && <Loader2 size={16} className="animate-spin" />}
+        {ligada ? 'Desligar pagamento automático' : 'Ativar pagamento automático'}
+      </button>
+    </div>
+  );
+};
+
 // Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
 // e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
 // isto aqui é o aviso e o caminho para pagar.
+// Carteira da plataforma: quanto entra por mês e em que pé está cada bolão.
+const PlataformaTab = () => {
+  const [dados, setDados] = useState(null);
+  const [erro, setErro] = useState('');
+
+  const carregar = async () => {
+    setErro('');
+    try {
+      const idToken = await getIdToken();
+      const res = await fetch('/api/admin/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Falha ao carregar');
+      setDados(d);
+    } catch (e) { setErro(e.message); }
+  };
+
+  useEffect(() => { carregar(); }, []);
+
+  if (erro) return <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">{erro}</div>;
+  if (!dados) return <div className="flex items-center gap-2 text-gray-500 py-8"><Loader2 size={18} className="animate-spin" /> Carregando...</div>;
+
+  const { resumo, boloes } = dados;
+  const reais = (c) => `R$ ${((c || 0) / 100).toFixed(2).replace('.', ',')}`;
+  const data = (ms) => ms ? new Date(ms).toLocaleDateString('pt-BR') : '—';
+
+  const selo = {
+    active:     ['bg-green-100 text-green-700',   'Ativo'],
+    trial:      ['bg-ouro-100 text-ouro-700',     'Em teste'],
+    overdue:    ['bg-orange-100 text-orange-700', 'Vencido'],
+    blocked:    ['bg-red-100 text-red-700',       'Bloqueado'],
+    plataforma: ['bg-noite-100 text-noite-600',   'Plataforma'],
+  };
+
+  const cartoes = [
+    ['Receita mensal', reais(resumo.mrrCentavos), 'Só bolões pagando'],
+    ['Bolões ativos', String(resumo.ativos), `de ${resumo.total} no total`],
+    ['Em teste', String(resumo.emTeste), 'ainda não pagam'],
+    ['Vencidos', String(resumo.vencidos), 'dentro da cortesia'],
+    ['Bloqueados', String(resumo.bloqueados), 'operação travada'],
+    ['Recorrentes', String(resumo.recorrentes), 'no Pix Automático'],
+  ];
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h2 className="font-display text-2xl text-noite-900" style={{ letterSpacing: '0.04em' }}>PLATAFORMA</h2>
+          <p className="text-noite-400 text-sm mt-1">Mensalidades de todos os bolões do SaaS.</p>
+        </div>
+        <button onClick={carregar} className="px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2 bg-white flex-shrink-0">
+          <RefreshCcw size={14} /> Atualizar
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+        {cartoes.map(([titulo, valor, nota]) => (
+          <div key={titulo} className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-noite-400 text-xs font-semibold uppercase" style={{ letterSpacing: '0.1em' }}>{titulo}</p>
+            <p className="font-display text-2xl text-noite-900 mt-1">{valor}</p>
+            <p className="text-noite-400 text-xs mt-0.5">{nota}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr className="text-left text-noite-500">
+                <th className="px-4 py-3 font-semibold">Bolão</th>
+                <th className="px-4 py-3 font-semibold">Situação</th>
+                <th className="px-4 py-3 font-semibold">Cobrança</th>
+                <th className="px-4 py-3 font-semibold">Acesso até</th>
+                <th className="px-4 py-3 font-semibold">Contato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boloes.map(b => {
+                const [cor, rotulo] = selo[b.status] || ['bg-noite-100 text-noite-600', b.status];
+                return (
+                  <tr key={b.id} className="border-b border-gray-100 last:border-0">
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-noite-800">{b.nome}</p>
+                      <p className="text-noite-400 text-xs">{b.id}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-bold px-2 py-1 rounded-full ${cor}`}>{rotulo}</span>
+                    </td>
+                    <td className="px-4 py-3 text-noite-600">
+                      {b.status === 'plataforma' ? '—' : (
+                        <>
+                          {reais(b.precoCentavos)}
+                          <span className="block text-xs text-noite-400">
+                            {b.recorrente ? 'recorrente' : 'avulsa'}{b.documento ? ` · ${b.documento}` : ''}
+                          </span>
+                        </>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-noite-600">{data(b.acessoAte)}</td>
+                    <td className="px-4 py-3 text-noite-600">
+                      {b.email || '—'}
+                      {b.whatsapp && <span className="block text-xs text-noite-400">{b.whatsapp}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const SubscriptionBanner = ({ onStatus }) => {
   const { tenantId, currentUser } = useApp();
   const [sub, setSub] = useState(null);
@@ -3248,6 +3442,8 @@ const AdminPanel = ({ setView }) => {
     { id: 'financial',      label: 'Financeiro',       icon: <DollarSign size={18} />},
     { id: 'communications', label: 'Comunicados',      icon: <Megaphone size={18} /> },
     { id: 'settings',       label: 'Configurações',    icon: <Edit2 size={18} />     },
+    // Carteira da plataforma: só o dono do SaaS, nunca o dono de um bolão.
+    ...(currentUser?.globalAdmin ? [{ id: 'plataforma', label: 'Plataforma', icon: <DollarSign size={18} /> }] : []),
   ];
   const activeTabLabel = adminTabMeta.find(t => t.id === activeTab)?.label || '';
 
@@ -3727,6 +3923,8 @@ const AdminPanel = ({ setView }) => {
           </div>
         )}
 
+        {activeTab === 'plataforma' && currentUser?.globalAdmin && <PlataformaTab />}
+
         {activeTab === 'settings' && (
           <div>
             <h2 className="text-2xl font-bold mb-6">Configurações</h2>
@@ -3750,6 +3948,7 @@ const AdminPanel = ({ setView }) => {
             {/* WhatsApp Settings */}
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
+                {!currentUser?.globalAdmin && <RecorrenciaCard />}
                 {!currentUser?.globalAdmin && <WhatsAppConnectCard />}
                 {currentUser?.globalAdmin && (
                 <div className="bg-white rounded-xl shadow-sm border p-6">

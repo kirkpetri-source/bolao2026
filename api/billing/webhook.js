@@ -49,13 +49,35 @@ export default async function handler(req, res) {
     }
 
     const correlationID = event.charge?.correlationID || '';
-    // Formato gravado em billing/subscribe: assinatura_{tenantId}_{timestamp}
-    const m = /^assinatura_(.+)_\d{13}$/.exec(correlationID);
-    if (!m) {
-      console.log('billing/webhook: correlationID fora do padrão de assinatura:', correlationID);
-      return res.status(200).json({ received: true });
+    const db = getAdminDb();
+
+    // Duas origens de pagamento chegam aqui. A cobrança avulsa carrega o tenant
+    // no próprio correlationID, que fomos nós que montamos. Já as parcelas do
+    // Pix Automático são geradas pela Woovi, com identificador dela — nesses
+    // casos o vínculo vem pelo id da assinatura, guardado no tenant.
+    let tenantId = (/^assinatura_(.+)_\d{13}$/.exec(correlationID) || [])[1] || null;
+
+    if (!tenantId) {
+      const idAssinatura = event.subscription?.globalID
+        || event.charge?.subscription?.globalID
+        || event.charge?.subscriptionGlobalID
+        || event.subscriptionGlobalID
+        || null;
+
+      if (!idAssinatura) {
+        console.log('billing/webhook: cobrança sem vínculo com assinatura, ignorada:', correlationID);
+        return res.status(200).json({ received: true });
+      }
+
+      const achados = await db.collection('tenants')
+        .where('subscription.wooviSubscriptionId', '==', idAssinatura).limit(1).get();
+      if (achados.empty) {
+        console.log('billing/webhook: nenhum bolão com a assinatura', idAssinatura);
+        return res.status(200).json({ received: true });
+      }
+      tenantId = achados.docs[0].id;
+      console.log(`billing/webhook: parcela recorrente reconhecida para ${tenantId}`);
     }
-    const tenantId = m[1];
 
     const appId = (process.env.LIONTECH_WOOVI_APP_ID || '').trim();
     if (!appId) {
@@ -67,7 +89,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ received: true });
     }
 
-    const db = getAdminDb();
     const ref = db.collection('tenants').doc(tenantId);
     const snap = await ref.get();
     if (!snap.exists) {
