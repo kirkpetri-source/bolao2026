@@ -3980,7 +3980,7 @@ const AdminPanel = ({ setView }) => {
                   <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${badge.color}`}>{badge.icon} {badge.text}</span>
                 </div>
                 <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
-                  <span>{round.matches?.length || 0} jogos</span>
+                  <span>{(() => { const r = resumoDaRodada(round.matches || []); return r.adiados ? `${r.valendo} jogos (${r.adiados} adiado${r.adiados > 1 ? 's' : ''})` : `${r.total} jogos`; })()}</span>
                   {dateRange && <span>📅 {dateRange}</span>}
                   {round.closeAt && <span>🔒 fecha {new Date(round.closeAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}</span>}
                 </div>

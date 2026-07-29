@@ -5,7 +5,7 @@ import { db } from './firebase.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
-import { isMatchPostponed } from '../api/_shared/matchStatus.js';
+import { isMatchPostponed, resumoDaRodada } from '../api/_shared/matchStatus.js';
 import { changeMyPassword, authErrorMessage } from './authService.js';
 import { isBlocked } from '../api/_shared/subscription.js';
 
@@ -336,7 +336,7 @@ const UserPanel = ({ setView }) => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm" style={{ color: 'var(--txt-3)' }}>{round.matches?.length || 0} jogos</span>
+            <span className="text-sm" style={{ color: 'var(--txt-3)' }}>{(() => { const r = resumoDaRodada(round.matches || []); return r.adiados ? `${r.valendo} jogos (${r.adiados} adiado${r.adiados > 1 ? 's' : ''})` : `${r.total} jogos`; })()}</span>
             {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
           </div>
         </button>
@@ -1233,7 +1233,11 @@ const UserPanel = ({ setView }) => {
         alert('Rodada sem jogos configurados. Aguarde o administrador adicionar os confrontos.');
         return;
       }
-      if (preds.length !== round.matches.length) {
+      // Confere contra os jogos que VALEM, não contra a rodada inteira: os
+      // adiados saem do formulário, então exigir todos deixava a cartela
+      // impossível de enviar.
+      const jogosExigidos = round.matches.filter(m => !isMatchPostponed(m));
+      if (preds.length !== jogosExigidos.length) {
         alert('Palpites incompletos. Revise e preencha todos os jogos.');
         return;
       }
@@ -1709,7 +1713,7 @@ const UserPanel = ({ setView }) => {
                               <h3 className="text-xl font-bold">{round.name}</h3>
                               <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded-full">✅ Aberta</span>
                             </div>
-                            <p className="text-gray-600">{round.matches?.length || 0} jogos • R$ {settings?.betValue?.toFixed(2) || '15,00'} por participação</p>
+                            <p className="text-gray-600">{(() => { const r = resumoDaRodada(round.matches || []); return r.adiados ? `${r.valendo} jogos (${r.adiados} adiado${r.adiados > 1 ? 's' : ''})` : `${r.total} jogos`; })()} • R$ {settings?.betValue?.toFixed(2) || '15,00'} por participação</p>
                           </div>
                           <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                             <button
@@ -1914,7 +1918,7 @@ const UserPanel = ({ setView }) => {
                               <span className="bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-0.5 rounded-full">🔜 Em breve</span>
                             </div>
                             <p className="text-gray-500 text-sm">
-                              {round.matches?.length || 0} jogos
+                              {(() => { const r = resumoDaRodada(round.matches || []); return r.adiados ? `${r.valendo} jogos (${r.adiados} adiado${r.adiados > 1 ? 's' : ''})` : `${r.total} jogos`; })()}
                               {firstMatchDate && ` • Inicia em ${formatDateTime(firstMatchDate)}`}
                             </p>
                           </div>
@@ -1933,9 +1937,9 @@ const UserPanel = ({ setView }) => {
                                 <span className="font-medium w-2/5 text-left">{match.awayTeamName}</span>
                               </div>
                             ))}
-                            {round.matches.length > 5 && (
+                            {resumoDaRodada(round.matches || []).valendo > 5 && (
                               <p className="text-xs text-gray-400 text-center pt-1">
-                                + {round.matches.length - 5} jogo(s) a confirmar
+                                + {resumoDaRodada(round.matches || []).valendo - 5} jogo(s) a confirmar
                               </p>
                             )}
                           </div>
