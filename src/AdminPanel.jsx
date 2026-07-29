@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
 import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
@@ -1716,7 +1716,14 @@ const AdminPanel = ({ setView }) => {
   useEffect(() => {
     const loadHistory = async () => {
       try {
-        const q = query(collection(db, 'settings_history'), orderBy('createdAt', 'desc'), limit(10));
+        // Filtra pelo bolão: sem isso a consulta traz o histórico de todos e a
+        // regra recusa a leitura inteira, deixando o dono sem histórico nenhum.
+        const q = query(
+          collection(db, 'settings_history'),
+          where('tenantId', '==', tenantId),
+          orderBy('createdAt', 'desc'),
+          limit(10)
+        );
         const snap = await getDocs(q);
         const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         setSettingsHistory(items);
@@ -1725,7 +1732,7 @@ const AdminPanel = ({ setView }) => {
       }
     };
     loadHistory();
-  }, [settings]);
+  }, [settings, tenantId]);
 
   // Helpers de formatação (Markdown simples)
   const wrapSelection = (start, end) => {
@@ -1833,9 +1840,13 @@ const AdminPanel = ({ setView }) => {
       return;
     }
     try {
+      // Um lote em vez de uma ida ao servidor por palpite: apagar 40 cartelas
+      // eram 40 requisicoes em fila, e a interface congelava enquanto isso.
       const userPredictions = predictions.filter(p => p.userId === user.id);
-      for (const pred of userPredictions) {
-        await deleteDoc(doc(db, 'predictions', pred.id));
+      for (let i = 0; i < userPredictions.length; i += 400) {
+        const lote = writeBatch(db);
+        userPredictions.slice(i, i + 400).forEach(pred => lote.delete(doc(db, 'predictions', pred.id)));
+        await lote.commit();
       }
       await deleteUser(user.id);
       alert('✅ Usuário excluído com sucesso!');
@@ -1856,12 +1867,16 @@ const AdminPanel = ({ setView }) => {
       
       const newPaidStatus = !cartelaPredictions[0].paid;
       
-      for (const pred of cartelaPredictions) {
-        await updatePrediction(pred.id, { paid: newPaidStatus });
-      }
+      const lote = writeBatch(db);
+      cartelaPredictions.forEach(pred => lote.update(doc(db, 'predictions', pred.id), {
+        paid: newPaidStatus,
+        statusPagamento: newPaidStatus ? 'pago' : 'pendente',
+      }));
+      await lote.commit();
 
       try {
         await addDoc(collection(db, 'admin_events'), {
+          tenantId,
           adminId: currentUser?.id || null,
           type: 'payment_status_changed',
           targetUserId: userId,
@@ -2657,6 +2672,7 @@ const AdminPanel = ({ setView }) => {
         const nextMaintenance = !!dataToSave.maintenanceMode;
         if (prevMaintenance !== nextMaintenance) {
           await addDoc(collection(db, 'logs'), {
+            tenantId,
             type: 'maintenance_toggle',
             maintenance: nextMaintenance,
             actorId: currentUser?.id || null,
@@ -2681,6 +2697,7 @@ const AdminPanel = ({ setView }) => {
         });
         if (changedFields.length > 0) {
           await addDoc(collection(db, 'settings_history'), {
+            tenantId,
             changedFields,
             actorId: currentUser?.id || null,
             actorName: currentUser?.name || 'Admin',
