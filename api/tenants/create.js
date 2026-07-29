@@ -105,7 +105,8 @@ export default async function handler(req, res) {
         createdAt: FieldValue.serverTimestamp(),
       });
       batch.set(db.collection('tenants').doc(slug).collection('members').doc(uid), {
-        role: 'owner', name,
+        role: 'owner', name, whatsapp, email,
+        establishmentId: null,
         createdAt: FieldValue.serverTimestamp(),
       });
       batch.set(db.collection('settings').doc(), {

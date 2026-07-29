@@ -516,7 +516,8 @@ const PASSOS_TOUR = [
 ];
 
 // Carteira da plataforma: quanto entra por mês e em que pé está cada bolão.
-const PlataformaTab = () => {
+// Exportado para a rota /plataforma reaproveitar sem duplicar a tela.
+export const PlataformaTab = () => {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState('');
 

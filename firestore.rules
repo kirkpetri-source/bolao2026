@@ -16,10 +16,10 @@ rules_version = '2';
 //    self-join no tenant com role 'participant'.
 //
 // Paridade preservada (endurecer quando o onboarding de novos tenants entrar):
-//  - /users: leitura por qualquer autenticado (ranking exibe nomes). Com um 2º
-//    tenant isso vaza nomes/whatsapp entre tenants — migrar nomes para members.
-//  - /teams e coleções de auditoria/infra: continuam gated por isAdmin()
-//    (campo global users.isAdmin), como antes do multi-tenant.
+//  - /users NÃO é listável: a lista de participantes sai de
+//    /tenants/{tid}/members, que carrega nome, whatsapp e e-mail.
+//  - Dois papéis distintos: operador da plataforma (users.platformAdmin) e
+//    dono de bolão (members.role == 'owner'). Ver isPlatformAdmin/isOwner.
 //  - /establishments e /public_config: leitura pública (telas pré-login).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -30,11 +30,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Admin global (dono da plataforma) — usado nas coleções não escopadas.
-    function isAdmin() {
+    // ── Dois papéis, de propósito ───────────────────────────────────────────
+    // OPERADOR DA PLATAFORMA: cuida do SaaS (catálogo de times, auditoria,
+    // visibilidade de qualquer bolão para suporte). É a Lion Tech.
+    // DONO DE BOLÃO: cuida do próprio bolão e dos participantes DELE.
+    //
+    // Antes os dois compartilhavam a flag `isAdmin`, e por isso um bolão só
+    // funcionava direito se o dono fosse a própria plataforma — o dono comum
+    // levava 403 ao tentar editar um participante do bolão dele.
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isPlatformAdmin() {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+        && (request.auth.token.platformAdmin == true
+            || (exists(/databases/$(database)/documents/users/$(request.auth.uid))
+                && userDoc().get('platformAdmin', false) == true));
     }
 
     function isSelf(userId) {
@@ -56,7 +67,16 @@ service cloud.firestore {
     // pedem pertencimento e ele só é membro do próprio. Leitura apenas: alterar
     // dado de cliente continua exigindo ser owner daquele bolão.
     function podeVerTenant(tid) {
-      return isMember(tid) || isAdmin();
+      return isMember(tid) || isPlatformAdmin();
+    }
+
+    // O alvo pertence a um bolão que eu sou dono? É assim que o dono gerencia
+    // os participantes DELE sem enxergar os dos outros.
+    function souDonoDoBolaoDe(userId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && isOwner(get(/databases/$(database)/documents/users/$(userId)).data.get('lastTenantId', ''))
+        && exists(/databases/$(database)/documents/tenants/$(get(/databases/$(database)/documents/users/$(userId)).data.get('lastTenantId', ''))/members/$(userId));
     }
 
     // Assinatura do bolão com a plataforma. Quem não paga fica bloqueado, e
@@ -90,20 +110,31 @@ service cloud.firestore {
     }
 
     // ── Usuários (identidade global) ────────────────────────────────────────
+    // /users é GLOBAL: sem tenantId, junta gente de todos os bolões. Listar
+    // essa coleção entregava nome e WhatsApp de todos os clientes a qualquer
+    // autenticado. A lista de participantes passou a sair de
+    // /tenants/{tid}/members, que já é escopada — aqui a varredura é negada.
     match /users/{userId} {
-      // Leitura por qualquer autenticado (o ranking exibe nomes dos participantes).
-      allow get, list: if isSignedIn();
+      allow get: if isSelf(userId) || isPlatformAdmin() || souDonoDoBolaoDe(userId);
+      allow list: if isPlatformAdmin();
 
-      // Criação: o usuário cria o próprio doc no cadastro (uid == doc id),
-      // e nunca pode se autodeclarar admin. Admin pode criar qualquer um.
-      allow create: if isAdmin()
-        || (isSelf(userId) && request.resource.data.isAdmin == false);
+      // Criação: o usuário cria o próprio doc no cadastro (uid == doc id) e
+      // nunca pode se autodeclarar admin. O dono cria participantes do bolão
+      // dele; a plataforma cria qualquer um.
+      allow create: if isPlatformAdmin()
+        || (isSelf(userId) && request.resource.data.isAdmin == false)
+        || (isOwner(request.resource.data.get('lastTenantId', ''))
+            && request.resource.data.isAdmin == false);
 
-      // Update: admin livre; o próprio usuário só campos não sensíveis.
-      allow update: if isAdmin()
+      // Update: plataforma livre; dono nos participantes do bolão dele; o
+      // próprio usuário só nos campos não sensíveis.
+      allow update: if isPlatformAdmin()
+        || (souDonoDoBolaoDe(userId) && protectedUserFieldsUnchanged())
         || (isSelf(userId) && protectedUserFieldsUnchanged());
 
-      allow delete: if isAdmin();
+      // Exclusão passa por api/admin/delete-user, que apaga também a conta no
+      // Auth e libera o e-mail — apagar só o doc daqui deixaria conta órfã.
+      allow delete: if isPlatformAdmin();
     }
 
     // ── Rodadas (escopadas por tenant) ──────────────────────────────────────
@@ -155,13 +186,13 @@ service cloud.firestore {
 
     // ── Comunicados: só o owner do tenant ───────────────────────────────────
     match /communications/{doc} {
-      allow read: if isOwner(resource.data.tenantId) || isAdmin();
+      allow read: if isOwner(resource.data.tenantId) || isPlatformAdmin();
       allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
     }
 
     // ── Configurações (contêm segredos Woovi/Evolution): só o owner ─────────
     match /settings/{doc} {
-      allow read: if isOwner(resource.data.tenantId) || isAdmin();
+      allow read: if isOwner(resource.data.tenantId) || isPlatformAdmin();
       allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
     }
 
@@ -174,17 +205,17 @@ service cloud.firestore {
     // ── Times: catálogo global compartilhado ────────────────────────────────
     match /teams/{doc} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isPlatformAdmin();
     }
 
     // Pedidos de importação de times: apenas admin global.
     match /team_import_requests/{doc} {
-      allow read, write: if isAdmin();
+      allow read, write: if isPlatformAdmin();
     }
 
     // ── Eventos de uso/analytics gravados pelo cliente (não sensíveis) ──────
     match /user_events/{doc} {
-      allow read: if isAdmin();
+      allow read: if isPlatformAdmin();
       allow create: if isSignedIn();
       allow update, delete: if false;
     }
@@ -192,25 +223,34 @@ service cloud.firestore {
     // ── Logs/auditoria/histórico do painel: só admin lê e cria ──────────────
     // Sem update/delete (integridade do histórico).
     match /admin_events/{doc} {
-      allow read, create: if isAdmin();
+      // O dono registra as ações do bolão dele; a plataforma lê tudo. Antes só
+      // o admin global gravava, então owner nenhum conseguia deixar auditoria.
+      allow read: if isPlatformAdmin() || isOwner(resource.data.get('tenantId', ''));
+      allow create: if isPlatformAdmin() || isOwner(request.resource.data.get('tenantId', ''));
       allow update, delete: if false;
     }
     match /audit_logs/{doc} {
-      allow read, create: if isAdmin();
+      allow read, create: if isPlatformAdmin();
       allow update, delete: if false;
     }
     match /settings_history/{doc} {
-      allow read, create: if isAdmin();
+      // O dono registra as ações do bolão dele; a plataforma lê tudo. Antes só
+      // o admin global gravava, então owner nenhum conseguia deixar auditoria.
+      allow read: if isPlatformAdmin() || isOwner(resource.data.get('tenantId', ''));
+      allow create: if isPlatformAdmin() || isOwner(request.resource.data.get('tenantId', ''));
       allow update, delete: if false;
     }
     match /logs/{doc} {
-      allow read, create: if isAdmin();
+      // O dono registra as ações do bolão dele; a plataforma lê tudo. Antes só
+      // o admin global gravava, então owner nenhum conseguia deixar auditoria.
+      allow read: if isPlatformAdmin() || isOwner(resource.data.get('tenantId', ''));
+      allow create: if isPlatformAdmin() || isOwner(request.resource.data.get('tenantId', ''));
       allow update, delete: if false;
     }
 
     // Transações de pagamento: leitura só admin; escrita via serverless.
     match /transactions/{doc} {
-      allow read: if isAdmin();
+      allow read: if isPlatformAdmin();
       allow write: if false;
     }
 

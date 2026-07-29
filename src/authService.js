@@ -81,9 +81,15 @@ export async function adminCreateUser({ whatsapp, password, userDoc = null, tena
       await setDoc(doc(secDb, 'users', uid), { ...userDoc, createdAt: serverTimestamp() });
     }
     if (tenantId) {
+      // O painel lê os participantes daqui, e não da coleção global /users —
+      // que juntaria gente de todos os bolões. Por isso o membro precisa
+      // carregar os campos usados na tela.
       await setDoc(doc(secDb, 'tenants', tenantId, 'members', uid), {
         role: 'participant',
         name: userDoc?.name || '',
+        whatsapp: userDoc?.whatsapp || '',
+        email: userDoc?.email || '',
+        establishmentId: userDoc?.establishmentId ?? null,
         createdAt: serverTimestamp(),
       });
     }

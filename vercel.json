@@ -12,7 +12,8 @@
     { "path": "/api/cron/backup",       "schedule": "0 5 * * *"   }
   ],
   "rewrites": [
-    { "source": "/ranking/:roundId", "destination": "/index.html" }
+    { "source": "/ranking/:roundId", "destination": "/index.html" },
+    { "source": "/plataforma", "destination": "/index.html" }
   ],
   "redirects": [
     {

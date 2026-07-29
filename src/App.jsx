@@ -8,6 +8,7 @@ import { db, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
 import { resolveTenantId, rememberTenant, publicConfigDocId } from './tenant.js';
 import NovaVersao from './components/NovaVersao.jsx';
+import Plataforma from './Plataforma.jsx';
 import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
@@ -222,8 +223,23 @@ const AppProvider = ({ children }) => {
       onSnapshot(byTenant('rounds'), s => setRounds(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('rounds:', err)),
       onSnapshot(collection(db, 'teams'), s => setTeams(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), err => console.error('teams:', err)),
       onSnapshot(byTenant('predictions'), s => setPredictions(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('predictions:', err)),
-      onSnapshot(collection(db, 'users'), s => setUsers(s.docs.map(d => { const data = d.data(); const { password, ...rest } = data; return { id: d.id, ...rest }; })), err => console.error('users:', err)),
-      onSnapshot(collection(db, 'tenants', tenantId, 'members'), s => setTenantMembers(s.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.error('members:', err)),
+      // Participantes vêm dos MEMBROS do bolão, nunca da coleção /users, que é
+      // global: assinar /users trazia para o navegador o nome e o WhatsApp de
+      // todos os clientes da plataforma, de todos os bolões.
+      onSnapshot(collection(db, 'tenants', tenantId, 'members'), s => {
+        const membros = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        setTenantMembers(membros);
+        setUsers(membros.map(m => ({
+          id: m.id,
+          name: m.name || '',
+          whatsapp: m.whatsapp || '',
+          email: m.email || '',
+          establishmentId: m.establishmentId ?? null,
+          // No contexto do bolão, "admin" é o dono dele.
+          isAdmin: m.role === 'owner',
+          tenantRole: m.role || 'participant',
+        })));
+      }, err => console.error('members:', err)),
     ];
     if (isAdminUser) {
       uns.push(
@@ -285,7 +301,11 @@ const AppProvider = ({ children }) => {
             role = mem.exists() ? mem.data().role : null;
           } catch (e) { console.warn('membership:', e); }
 
-          const globalAdmin = tok.claims.admin === true || !!data.isAdmin;
+          // Operar a plataforma e administrar um bolão são papéis distintos:
+          // o primeiro é da Lion Tech, o segundo é de cada cliente. Antes os
+          // dois saíam da mesma flag `isAdmin`, e por isso o dono comum não
+          // conseguia sequer editar um participante do bolão dele.
+          const globalAdmin = tok.claims.platformAdmin === true || data.platformAdmin === true;
           setCurrentUser({
             id: fbUser.uid, ...data,
             isAdmin: globalAdmin || role === 'owner',
@@ -998,9 +1018,16 @@ const MaintenanceScreen = () => {
   );
 };
 
+// A administração da plataforma mora numa rota própria, com login próprio.
+function ehRotaDaPlataforma() {
+  try { return window.location.pathname.replace(/\/+$/, '').toLowerCase() === '/plataforma'; }
+  catch { return false; }
+}
+
 function App() {
   const { currentUser, loading, settings } = useApp();
   const [view, setView] = useState('login');
+  const naPlataforma = ehRotaDaPlataforma();
 
   useEffect(() => {
     if (currentUser) {
@@ -1033,6 +1060,9 @@ function App() {
       </div>
     );
   }
+
+  // A rota da plataforma tem tela própria e não passa pelo fluxo do bolão.
+  if (naPlataforma) return <Plataforma />;
 
   if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
   if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
