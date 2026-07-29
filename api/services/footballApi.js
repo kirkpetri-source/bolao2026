@@ -37,6 +37,9 @@ export async function getRoundFixtures(roundNumber) {
     awayScore: e.intAwayScore !== null && e.intAwayScore !== '' ? parseInt(e.intAwayScore, 10) : null,
     finished: e.strStatus === 'Match Finished',
     status: e.strStatus || 'Not Started',
+    // Campo proprio da fonte. Nem sempre concorda com strStatus — na rodada 21
+    // vinha "no" com o status ja em "PST" — entao guardamos os dois.
+    strPostponed: e.strPostponed || null,
     homeTeamNormalized: normalizeName(e.strHomeTeam),
     awayTeamNormalized: normalizeName(e.strAwayTeam)
   }));

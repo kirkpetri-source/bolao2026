@@ -13,6 +13,32 @@ describe('jogo adiado', () => {
     expect(isMatchPostponed(jogo({ status: 'Cancelled' }))).toBe(true);
   });
 
+  // A fonte usa CODIGO, nao texto. Na rodada 21 do Brasileirao ela devolveu
+  // "PST" em quatro jogos: procurar por "postponed" nao pegava nenhum, e os
+  // jogos seguiam na rodada como se fossem acontecer.
+  it('reconhece o codigo PST, que e o que a fonte realmente manda', () => {
+    expect(isMatchPostponed(jogo({ apiStatus: 'PST' }))).toBe(true);
+  });
+
+  it('reconhece os demais codigos de jogo que nao acontece', () => {
+    for (const c of ['PPD', 'CANC', 'ABD', 'SUSP', 'TBD']) {
+      expect(isMatchPostponed(jogo({ apiStatus: c })), c).toBe(true);
+    }
+  });
+
+  it('nao confunde com os codigos de jogo normal', () => {
+    for (const c of ['NS', 'FT', '1H', 'HT', '2H', 'AET', 'PEN']) {
+      expect(isMatchPostponed(jogo({ apiStatus: c })), c).toBe(false);
+    }
+  });
+
+  it('aceita o campo proprio da fonte, que nem sempre concorda com o status', () => {
+    expect(isMatchPostponed(jogo({ strPostponed: 'yes', apiStatus: 'NS' }))).toBe(true);
+    // O contrario tambem vale: status PST com o campo dizendo "no" — foi
+    // exatamente o que veio na rodada 21.
+    expect(isMatchPostponed(jogo({ strPostponed: 'no', apiStatus: 'PST' }))).toBe(true);
+  });
+
   it('nao confunde jogo normal', () => {
     expect(isMatchPostponed(jogo({ apiStatus: 'Not Started' }))).toBe(false);
     expect(isMatchPostponed(jogo({ apiStatus: 'Match Finished' }))).toBe(false);

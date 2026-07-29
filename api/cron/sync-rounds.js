@@ -2,14 +2,14 @@ import { db, getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.
 import { getRoundFixtures, normalizeName } from '../services/footballApi.js';
 import { collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, query, where } from '../_shared/firestore.js';
 import { listTenants } from '../_shared/tenant.js';
+import { isMatchPostponed } from '../_shared/matchStatus.js';
 
 const TOTAL_ROUNDS = 38;
 
-// TheSportsDB usa textos livres: "Postponed", "Match Postponed", "PPD", e
-// tambem "Cancelled"/"Abandoned" para jogos que nao serao concluidos.
+// Delega para a regra unica: manter uma copia aqui foi exatamente o que deixou
+// o codigo "PST" passar batido em um lado e nao no outro.
 export function ehAdiado(status) {
-  const s = String(status || '').toLowerCase();
-  return /postpon|adiad|ppd|cancel|abandon|suspend/.test(s);
+  return isMatchPostponed({ apiStatus: status });
 }
 
 // Quantas horas a data mudou entre o que estava gravado e o que a API diz.
@@ -119,7 +119,8 @@ export default async function handler(req, res) {
             // que ainda vai acontecer: nunca ganha placar, nunca "termina", e
             // a rodada fica em andamento para sempre.
             apiStatus: f.status || null,
-            postponed: ehAdiado(f.status),
+            strPostponed: f.strPostponed || null,
+            postponed: isMatchPostponed({ apiStatus: f.status, strPostponed: f.strPostponed }),
           };
         });
 

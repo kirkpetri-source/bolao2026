@@ -2,15 +2,24 @@
 // app do participante e os crons precisam concordar sobre o que é um jogo
 // adiado, senão a tela mostra uma coisa e a apuração faz outra.
 
-const PADRAO_ADIADO = /postpon|adiad|ppd|cancel|abandon|suspend/i;
+// A fonte usa CÓDIGOS, não texto: na rodada 21 do Brasileirão ela devolveu
+// "PST" para quatro jogos adiados. Procurar só por "postponed" ou "PPD" não
+// pegava nada, e os jogos seguiam aparecendo como se fossem acontecer.
+const CODIGOS_ADIADO = new Set(['PST', 'PPD', 'CANC', 'CNC', 'ABD', 'SUSP', 'INT', 'TBD', 'POST']);
+const PADRAO_ADIADO = /postpon|adiad|cancel|abandon|suspend|adiam/i;
 
-// Jogo que não vai acontecer na data prevista. A marca vem do sync (campo
-// `postponed`); o texto do status é o reforço, para jogos gravados antes de o
-// campo existir.
 export function isMatchPostponed(match) {
   if (!match) return false;
   if (match.postponed === true) return true;
-  return PADRAO_ADIADO.test(String(match.apiStatus || match.status || ''));
+  // A fonte também tem um campo próprio, que nem sempre concorda com o status:
+  // na rodada 21 ele vinha "no" enquanto o status já era "PST". Basta um dos
+  // dois acusar para o jogo sair da rodada.
+  if (String(match.strPostponed || '').toLowerCase() === 'yes') return true;
+
+  const bruto = String(match.apiStatus ?? match.status ?? '').trim();
+  if (!bruto) return false;
+  if (CODIGOS_ADIADO.has(bruto.toUpperCase())) return true;
+  return PADRAO_ADIADO.test(bruto);
 }
 
 // Vale pontos? Jogo adiado NÃO vale — e não vale para ninguém, o que mantém a
