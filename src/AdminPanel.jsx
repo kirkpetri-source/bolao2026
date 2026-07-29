@@ -148,6 +148,39 @@ const RecebimentoAutomaticoCard = () => {
 const ConviteCard = () => {
   const { tenantId, settings } = useApp();
   const [copiado, setCopiado] = useState('');
+  const [listado, setListado] = useState(true);
+  const [salvandoLista, setSalvandoLista] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'tenants', tenantId));
+        // Ausente = aparece: é o comportamento esperado por quem acabou de criar.
+        if (vivo && snap.exists()) setListado(snap.data().listadoPublicamente !== false);
+      } catch { /* sem acesso: mantém o padrão */ }
+    })();
+    return () => { vivo = false; };
+  }, [tenantId]);
+
+  const alternarListagem = async (valor) => {
+    setSalvandoLista(true);
+    const anterior = listado;
+    setListado(valor);
+    try {
+      const idToken = await getIdToken();
+      const r = await fetch('/api/tenants/listing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, tenantId, listado: valor }),
+      });
+      if (!r.ok) throw new Error('falhou');
+    } catch {
+      setListado(anterior);   // desfaz para a tela não mentir sobre o estado
+    } finally {
+      setSalvandoLista(false);
+    }
+  };
 
   const nome = settings?.brandName || 'Nosso bolão';
   const url = inviteUrl(tenantId);
@@ -190,6 +223,22 @@ const ConviteCard = () => {
           <Copy size={15} /> {copiado === 'msg' ? 'Copiada!' : 'Copiar mensagem'}
         </button>
       </div>
+
+      {/* Quem perdeu o link acha o bolão na lista da página inicial. Bolão de
+          empresa ou de família não deveria estar num catálogo aberto, então a
+          escolha é do organizador. */}
+      <label className="flex items-start gap-2.5 mt-5 pt-4 border-t text-sm text-gray-600 cursor-pointer select-none">
+        <input type="checkbox" checked={listado} disabled={salvandoLista}
+          onChange={(e) => alternarListagem(e.target.checked)}
+          className="w-4 h-4 mt-0.5 accent-[#008542] flex-shrink-0" />
+        <span>
+          Mostrar meu bolão na lista pública da página inicial
+          <span className="block text-xs text-gray-400">
+            Ajuda quem perdeu o link a encontrar o bolão. Desmarque se ele for fechado —
+            aí só entra quem receber o link de você.
+          </span>
+        </span>
+      </label>
     </div>
   );
 };

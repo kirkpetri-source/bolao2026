@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Trophy, LogIn, Loader2, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Trophy, LogIn, Loader2, ArrowRight, Search } from 'lucide-react';
 import { loginWithWhatsapp } from './authService.js';
 
 // Página da raiz do site.
@@ -17,6 +17,31 @@ export default function Entrada({ setView }) {
   const [erro, setErro] = useState('');
   const [entrando, setEntrando] = useState(false);
   const [mostrarLogin, setMostrarLogin] = useState(false);
+
+  // Lista de bolões para quem perdeu o link. Carregada sob demanda: na maioria
+  // dos acessos a pessoa chega pelo link certo e não precisa dela.
+  const [boloes, setBoloes] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [busca, setBusca] = useState('');
+
+  const abrirLista = async () => {
+    if (boloes) return;
+    setBuscando(true);
+    try {
+      const r = await fetch('/api/tenants/list');
+      const d = await r.json();
+      setBoloes(r.ok ? (d.boloes || []) : []);
+    } catch { setBoloes([]); } finally { setBuscando(false); }
+  };
+
+  const filtrados = useMemo(() => {
+    if (!boloes) return [];
+    const t = busca.trim().toLowerCase();
+    if (!t) return boloes;
+    // Compara sem acento: quem procura "bolao do ze" acha "Bolão do Zé".
+    const limpa = (x) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    return boloes.filter(b => limpa(b.nome).includes(limpa(t)) || b.slug.includes(limpa(t)));
+  }, [boloes, busca]);
 
   const entrar = async () => {
     setErro(''); setEntrando(true);
@@ -50,6 +75,36 @@ export default function Entrada({ setView }) {
             algo como <span className="font-mono text-noite-700">.../nome-do-bolao</span>.
             É por ele que você se cadastra e faz seus palpites.
           </p>
+
+          {boloes === null ? (
+            <button onClick={abrirLista} disabled={buscando} className="v2-btn-outline w-full py-3 mb-3 disabled:opacity-60">
+              {buscando ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+              Não sei o nome — ver a lista de bolões
+            </button>
+          ) : (
+            <div className="mb-4">
+              <label className="v2-label">Procure o seu bolão</label>
+              <input type="text" value={busca} onChange={(e) => setBusca(e.target.value)}
+                placeholder="Digite parte do nome" className="v2-input mb-2" autoFocus />
+              <div className="max-h-56 overflow-y-auto rounded-xl border divide-y">
+                {filtrados.length === 0 && (
+                  <p className="text-sm text-noite-400 p-3">
+                    {boloes.length === 0 ? 'Nenhum bolão disponível na lista.' : 'Nenhum bolão com esse nome.'}
+                  </p>
+                )}
+                {filtrados.map(b => (
+                  <a key={b.slug} href={`/${b.slug}`}
+                    className="flex items-center justify-between gap-2 px-3 py-2.5 hover:bg-gray-50 transition-colors">
+                    <span className="text-sm font-medium text-noite-800 truncate">{b.nome}</span>
+                    <ArrowRight size={15} className="text-noite-400 flex-shrink-0" />
+                  </a>
+                ))}
+              </div>
+              <p className="text-xs text-noite-400 mt-2">
+                Não achou? Peça o link ao organizador — bolões fechados não aparecem aqui.
+              </p>
+            </div>
+          )}
 
           {!mostrarLogin ? (
             <button onClick={() => setMostrarLogin(true)} className="v2-btn-outline w-full py-3 mb-3">
