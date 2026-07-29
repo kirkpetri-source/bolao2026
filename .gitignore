@@ -16,3 +16,6 @@ users-import.json
 # Backups locais do Firestore (contêm dados — não commitar)
 backups/
 .env*
+
+# Scripts de diagnostico pontuais
+diag-*.mjs
