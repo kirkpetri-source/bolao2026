@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   try {
-    const { idToken, tenantId, enabled, taxID } = req.body || {};
+    const { idToken, tenantId, enabled, taxID, email } = req.body || {};
     if (!idToken || !tenantId || typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Parâmetros: idToken, tenantId, enabled (booleano)' });
     }
@@ -78,8 +78,16 @@ export default async function handler(req, res) {
     if (!isTaxIdValido(doc)) {
       return res.status(400).json({ error: 'Informe um CPF ou CNPJ válido para ativar a cobrança recorrente.' });
     }
+
+    // Bolões criados antes da coleta de e-mail no cadastro não têm ownerEmail;
+    // em vez de mandá-los a um formulário que não existe, aceitamos aqui.
+    const emailLimpo = String(email || '').trim().toLowerCase();
+    const emailFinal = tenant.ownerEmail || emailLimpo;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailFinal)) {
+      return res.status(400).json({ error: 'Informe um e-mail válido — é para ele que vão os avisos de cobrança.' });
+    }
     if (!tenant.ownerEmail) {
-      return res.status(400).json({ error: 'Cadastre um e-mail no bolão antes de ativar a recorrência.' });
+      await ref.update({ ownerEmail: emailFinal });
     }
 
     if (sub.wooviSubscriptionId) {
@@ -92,7 +100,7 @@ export default async function handler(req, res) {
       customer: {
         name: String(tenant.name || 'Organizador').slice(0, 60),
         taxID: doc,
-        email: tenant.ownerEmail,
+        email: emailFinal,
         phone: String(tenant.ownerWhatsapp || '').replace(/\D/g, ''),
       },
     });

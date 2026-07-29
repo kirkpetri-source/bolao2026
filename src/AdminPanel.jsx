@@ -17,7 +17,9 @@ import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/
 const RecorrenciaCard = () => {
   const { tenantId, currentUser } = useApp();
   const [sub, setSub] = useState(null);
+  const [temEmail, setTemEmail] = useState(true);
   const [doc_, setDoc_] = useState('');
+  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [erro, setErro] = useState('');
@@ -25,7 +27,9 @@ const RecorrenciaCard = () => {
   const carregar = async () => {
     try {
       const snap = await getDoc(doc(db, 'tenants', tenantId));
-      if (snap.exists()) setSub(snap.data().subscription || null);
+      if (!snap.exists()) return;
+      setSub(snap.data().subscription || null);
+      setTemEmail(!!snap.data().ownerEmail);
     } catch { /* sem permissão: o card some */ }
   };
   useEffect(() => { carregar(); }, [tenantId]);
@@ -40,7 +44,7 @@ const RecorrenciaCard = () => {
       const res = await fetch('/api/billing/recurrence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken, tenantId, enabled: ativar, taxID: doc_ }),
+        body: JSON.stringify({ idToken, tenantId, enabled: ativar, taxID: doc_, email }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detalhe || d.error || 'Não foi possível concluir');
@@ -67,11 +71,22 @@ const RecorrenciaCard = () => {
       </p>
 
       {!ligada && (
-        <div className="mb-4">
-          <label className="v2-label">CPF ou CNPJ do responsável</label>
-          <input type="text" placeholder="Somente números" value={doc_}
-            onChange={(e) => setDoc_(e.target.value)} className="v2-input" />
-          <p className="text-xs text-gray-400 mt-1">Exigido pelo banco para autorizar o débito automático.</p>
+        <div className="mb-4 space-y-3">
+          <div>
+            <label className="v2-label">CPF ou CNPJ do responsável</label>
+            <input type="text" placeholder="Somente números" value={doc_}
+              onChange={(e) => setDoc_(e.target.value)} className="v2-input" />
+            <p className="text-xs text-gray-400 mt-1">Exigido pelo banco para autorizar o débito automático.</p>
+          </div>
+          {/* Bolões criados antes da coleta de e-mail no cadastro caem aqui. */}
+          {!temEmail && (
+            <div>
+              <label className="v2-label">E-mail para os avisos de cobrança</label>
+              <input type="email" placeholder="voce@email.com" value={email}
+                onChange={(e) => setEmail(e.target.value)} className="v2-input" />
+              <p className="text-xs text-gray-400 mt-1">Seu bolão ainda não tem e-mail cadastrado.</p>
+            </div>
+          )}
         </div>
       )}
 
