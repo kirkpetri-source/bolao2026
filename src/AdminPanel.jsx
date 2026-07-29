@@ -7,6 +7,7 @@ import { db, PUBLIC_CONFIG_ID, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
+import GuidedTour from './components/GuidedTour.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
@@ -106,6 +107,46 @@ const RecorrenciaCard = () => {
 // Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
 // e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
 // isto aqui é o aviso e o caminho para pagar.
+// Roteiro do primeiro acesso. A ordem segue o que o organizador precisa fazer
+// para o bolão rodar, não a ordem do menu: primeiro o que trava a operação
+// (PIX e WhatsApp), depois o dia a dia, e a assinatura por último.
+const PASSOS_TOUR = [
+  {
+    titulo: 'Bem-vindo ao seu bolão',
+    texto: 'São 6 passos rápidos mostrando o que configurar para começar a receber palpites. Dá para pular e rever quando quiser.',
+  },
+  {
+    alvo: 'aba-settings', aba: 'settings',
+    titulo: 'Comece pelas Configurações',
+    texto: 'É aqui que você define a chave PIX que vai receber as cartelas, o valor de cada uma e o nome do bolão. Sem a chave PIX, ninguém consegue pagar.',
+  },
+  {
+    alvo: 'whatsapp', aba: 'settings',
+    titulo: 'Conecte o WhatsApp',
+    texto: 'Escaneie o QR Code com o celular do bolão. É por esse número que saem as confirmações de cartela, as cobranças e os resultados de cada rodada.',
+  },
+  {
+    alvo: 'aba-rounds', aba: 'rounds',
+    titulo: 'Rodadas',
+    texto: 'Os jogos do Brasileirão entram sozinhos todo dia. Aqui você abre a rodada para receber palpites e acompanha o encerramento.',
+  },
+  {
+    alvo: 'aba-participants', aba: 'participants',
+    titulo: 'Participantes',
+    texto: 'Convide a galera pelo link do seu bolão e acompanhe quem já entrou. Cada pessoa se cadastra sozinha pelo WhatsApp.',
+  },
+  {
+    alvo: 'aba-financial', aba: 'financial',
+    titulo: 'Financeiro',
+    texto: 'Veja quem pagou a cartela e dê baixa nos pagamentos. Os que estão em aberto aparecem destacados para você cobrar.',
+  },
+  {
+    alvo: 'assinatura', aba: 'dashboard',
+    titulo: 'Sua assinatura',
+    texto: 'Você tem 7 dias de teste. Antes de acabar, ative a assinatura por aqui — sem ela o painel trava e os participantes não conseguem palpitar.',
+  },
+];
+
 // Carteira da plataforma: quanto entra por mês e em que pé está cada bolão.
 const PlataformaTab = () => {
   const [dados, setDados] = useState(null);
@@ -307,7 +348,7 @@ const SubscriptionBanner = ({ onStatus }) => {
   };
 
   return (
-    <div className={`border-2 rounded-xl p-4 mb-5 ${tom.caixa}`}>
+    <div data-tour="assinatura" className={`border-2 rounded-xl p-4 mb-5 ${tom.caixa}`}>
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
         <div className="flex items-start gap-3">
           <AlertCircle size={20} className={tom.titulo} />
@@ -437,7 +478,7 @@ const WhatsAppConnectCard = () => {
   const qrSrc = conn.qr ? (conn.qr.startsWith('data:') ? conn.qr : `data:image/png;base64,${conn.qr}`) : null;
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-6">
+    <div data-tour="whatsapp" className="bg-white rounded-xl shadow-sm border p-6">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-lg font-bold">Conexão do WhatsApp do seu bolão</h3>
         {conn.state === 'open' && <span className="text-xs font-bold px-2 py-1 rounded-full bg-green-100 text-green-700">CONECTADO</span>}
@@ -942,6 +983,23 @@ const AdminPanel = ({ setView }) => {
   
   const [activeTab, setActiveTab] = useState('financial');
   const [subStatus, setSubStatus] = useState(null);
+
+  // Tour de primeira execução. A marca fica no navegador porque é preferência
+  // de interface, não dado do bolão — e assim não custa escrita no Firestore
+  // nem exige mudança nas regras.
+  const chaveTour = `tour-admin:${currentUser?.id || 'anon'}:${tenantId}`;
+  const [mostrarTour, setMostrarTour] = useState(false);
+  useEffect(() => {
+    if (!currentUser?.id || currentUser?.globalAdmin) return;
+    try {
+      if (!localStorage.getItem(chaveTour)) setMostrarTour(true);
+    } catch { /* navegador sem localStorage: só não mostra */ }
+  }, [chaveTour, currentUser?.id, currentUser?.globalAdmin]);
+
+  const encerrarTour = () => {
+    setMostrarTour(false);
+    try { localStorage.setItem(chaveTour, new Date().toISOString()); } catch { /* idem */ }
+  };
   const [editingRound, setEditingRound] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingEstablishment, setEditingEstablishment] = useState(null);
@@ -3472,6 +3530,10 @@ const AdminPanel = ({ setView }) => {
   return (
     <div className="min-h-screen font-body flex page-bg">
 
+      {mostrarTour && (
+        <GuidedTour passos={PASSOS_TOUR} aoTrocarAba={setActiveTab} aoFechar={encerrarTour} />
+      )}
+
       {/* ═══════════════════════════════════
           SIDEBAR — dark navigation rail
           ═══════════════════════════════════ */}
@@ -3492,6 +3554,7 @@ const AdminPanel = ({ setView }) => {
           {adminTabMeta.map(({ id, label, icon }) => (
             <button
               key={id}
+              data-tour={`aba-${id}`}
               onClick={() => setActiveTab(id)}
               className={`w-full flex items-center gap-3 px-2 md:px-3 py-2.5 rounded-lg transition-all duration-150 text-sm font-medium border-l-2 ${
                 activeTab === id
@@ -3970,6 +4033,18 @@ const AdminPanel = ({ setView }) => {
             {/* WhatsApp Settings */}
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
+                {!currentUser?.globalAdmin && (
+                  <div className="bg-white rounded-xl shadow-sm border p-6">
+                    <h3 className="text-lg font-bold mb-2">Tutorial do painel</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Reveja o passo a passo com as principais funções e o que precisa
+                      estar configurado para o bolão rodar.
+                    </p>
+                    <button onClick={() => setMostrarTour(true)} className="v2-btn-outline px-5 py-2.5 text-sm">
+                      <Bell size={16} /> Rever tutorial
+                    </button>
+                  </div>
+                )}
                 {!currentUser?.globalAdmin && <RecorrenciaCard />}
                 {!currentUser?.globalAdmin && <WhatsAppConnectCard />}
                 {currentUser?.globalAdmin && (
