@@ -15,7 +15,7 @@ import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/
 // Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
 // e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
 // isto aqui é o aviso e o caminho para pagar.
-const SubscriptionBanner = () => {
+const SubscriptionBanner = ({ onStatus }) => {
   const { tenantId, currentUser } = useApp();
   const [sub, setSub] = useState(null);
   const [pix, setPix] = useState(null);
@@ -28,7 +28,11 @@ const SubscriptionBanner = () => {
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'tenants', tenantId));
-        if (vivo && snap.exists()) setSub(snap.data().subscription || null);
+        if (!vivo || !snap.exists()) return;
+        const s = snap.data().subscription || null;
+        setSub(s);
+        // O painel precisa saber se está bloqueado para trancar as ferramentas.
+        if (onStatus) onStatus(s ? evaluateStatus(s) : null);
       } catch { /* sem permissão ou offline: o banner some, o painel segue */ }
     })();
     return () => { vivo = false; };
@@ -721,6 +725,7 @@ const AdminPanel = ({ setView }) => {
   console.log('AdminPanel - Settings:', settings);
   
   const [activeTab, setActiveTab] = useState('financial');
+  const [subStatus, setSubStatus] = useState(null);
   const [editingRound, setEditingRound] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingEstablishment, setEditingEstablishment] = useState(null);
@@ -3326,7 +3331,29 @@ const AdminPanel = ({ setView }) => {
 
         {/* Content */}
         <div className="p-4 sm:p-6 flex-1">
-        <SubscriptionBanner />
+        <SubscriptionBanner onStatus={setSubStatus} />
+
+        {/* Bloqueado: o organizador entra e navega, mas as ferramentas ficam
+            fora do ar até pagar. Trancá-lo para fora da conta tiraria dele
+            justamente a tela onde está o botão de pagamento. */}
+        {subStatus === STATUS.BLOCKED ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-2xl mx-auto mt-4">
+            <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={28} className="text-red-600" />
+            </div>
+            <h2 className="font-display text-2xl text-noite-900 mb-2" style={{ letterSpacing: '0.04em' }}>FERRAMENTAS BLOQUEADAS</h2>
+            <p className="text-noite-500 text-sm leading-relaxed max-w-md mx-auto">
+              Sua conta continua ativa e o histórico do bolão segue aqui, mas enquanto a
+              mensalidade estiver em aberto você não consegue abrir rodadas, e os
+              participantes não conseguem enviar palpites.
+            </p>
+            <p className="text-noite-500 text-sm leading-relaxed max-w-md mx-auto mt-3">
+              Use o botão <strong>Ativar meu bolão</strong> acima. A liberação é
+              automática assim que o pagamento for confirmado.
+            </p>
+          </div>
+        ) : (
+        <>
         {activeTab === 'dashboard' && (
           <div>
             <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-6">
@@ -5228,6 +5255,8 @@ const AdminPanel = ({ setView }) => {
               </div>
             )}
           </div>
+        )}
+        </>
         )}
         </div>
       </div>{/* end main area */}

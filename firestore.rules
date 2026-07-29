@@ -99,10 +99,16 @@ service cloud.firestore {
     }
 
     // ── Rodadas (escopadas por tenant) ──────────────────────────────────────
+    // Bolão bloqueado continua legível — o organizador entra e vê o histórico —
+    // mas não abre nem edita rodada até pagar. É isso que trava a operação dele
+    // sem trancá-lo para fora da própria conta.
     match /rounds/{doc} {
       allow read: if isMember(resource.data.tenantId);
-      allow create: if isOwner(request.resource.data.tenantId);
-      allow update, delete: if isOwner(resource.data.tenantId);
+      allow create: if isOwner(request.resource.data.tenantId)
+        && !tenantBlocked(request.resource.data.tenantId);
+      allow update: if isOwner(resource.data.tenantId)
+        && !tenantBlocked(resource.data.tenantId);
+      allow delete: if isOwner(resource.data.tenantId);
     }
 
     // ── Palpites (escopados por tenant) ─────────────────────────────────────
