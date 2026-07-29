@@ -11,7 +11,7 @@ import { rememberTenant, inviteUrl } from './tenant.js';
 const OnboardingScreen = ({ setView }) => {
   const { login } = useApp();
   const [form, setForm] = useState({
-    bolaoName: '', name: '', whatsapp: '', password: '', confirmPassword: '',
+    bolaoName: '', name: '', whatsapp: '', email: '', password: '', confirmPassword: '',
     pixKey: '', betValue: 15,
   });
   const [error, setError] = useState('');
@@ -25,6 +25,9 @@ const OnboardingScreen = ({ setView }) => {
     if (!form.bolaoName.trim() || !form.name.trim() || !form.whatsapp || !form.password) {
       setError('Preencha nome do bolão, seu nome, WhatsApp e senha.'); return;
     }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
+      setError('Informe um e-mail válido — é por ele que enviamos os avisos de cobrança.'); return;
+    }
     if (form.password !== form.confirmPassword) { setError('Senhas diferentes!'); return; }
     if (form.password.length < 6) { setError('Senha mínimo 6 caracteres!'); return; }
     setError(''); setSaving(true);
@@ -36,6 +39,7 @@ const OnboardingScreen = ({ setView }) => {
           bolaoName: form.bolaoName.trim(),
           name: form.name.trim(),
           whatsapp: form.whatsapp,
+          email: form.email.trim(),
           password: form.password,
           pixKey: form.pixKey.trim(),
           betValue: Number(form.betValue) || 15,
@@ -154,6 +158,11 @@ const OnboardingScreen = ({ setView }) => {
                 <div>
                   <label className="v2-label">WhatsApp</label>
                   <input type="tel" placeholder="11999999999" value={form.whatsapp} onChange={(e) => setForm(f => ({ ...f, whatsapp: e.target.value.replace(/\D/g, '') }))} className="v2-input" />
+                </div>
+                <div>
+                  <label className="v2-label">E-mail</label>
+                  <input type="email" placeholder="voce@email.com" value={form.email} onChange={set('email')} className="v2-input" />
+                  <p className="text-xs text-noite-400 mt-1">Usado só para os avisos de cobrança. O login continua sendo pelo WhatsApp.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

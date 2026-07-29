@@ -8,6 +8,7 @@
     { "path": "/api/cron/bolao-engine", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/sync-scores",  "schedule": "*/5 * * * *" },
     { "path": "/api/cron/daily-reminder", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/billing",      "schedule": "0 12 * * *"   },
     { "path": "/api/cron/backup",       "schedule": "0 5 * * *"   }
   ],
   "rewrites": [

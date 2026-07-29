@@ -51,6 +51,14 @@ service cloud.firestore {
       return isMember(tid) && get(memberPath(tid)).data.role == 'owner';
     }
 
+    // Assinatura do bolão com a plataforma. Quem não paga fica bloqueado, e
+    // aqui é o único lugar que o cliente não contorna: o painel apenas espelha
+    // esta decisão. O status é escrito pelo cron de billing (Admin SDK).
+    function tenantBlocked(tid) {
+      return exists(/databases/$(database)/documents/tenants/$(tid))
+        && get(/databases/$(database)/documents/tenants/$(tid)).data.get('subscription', {}).get('status', 'trial') == 'blocked';
+    }
+
     // Campos que o próprio usuário NÃO pode alterar em si mesmo.
     function protectedUserFieldsUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys()
@@ -103,18 +111,21 @@ service cloud.firestore {
 
       // Membro cria palpite em seu próprio nome e NUNCA marca como pago.
       // Owner pode criar em nome de qualquer participante.
-      allow create: if isOwner(request.resource.data.tenantId)
-        || (isMember(request.resource.data.tenantId)
-            && request.resource.data.userId == request.auth.uid
-            && request.resource.data.paid == false);
+      // Bolão com assinatura bloqueada não recebe palpite de ninguém.
+      allow create: if !tenantBlocked(request.resource.data.tenantId)
+        && (isOwner(request.resource.data.tenantId)
+            || (isMember(request.resource.data.tenantId)
+                && request.resource.data.userId == request.auth.uid
+                && request.resource.data.paid == false));
 
       // Update do próprio palpite sem mexer no status de pagamento (e sem
       // trocar de tenant). O 'pago' só muda via owner ou webhook (Admin SDK).
-      allow update: if isOwner(resource.data.tenantId)
-        || (isSignedIn()
-            && resource.data.userId == request.auth.uid
-            && !request.resource.data.diff(resource.data).affectedKeys()
-                 .hasAny(['paid', 'statusPagamento', 'dataPagamento', 'tenantId']));
+      allow update: if !tenantBlocked(resource.data.tenantId)
+        && (isOwner(resource.data.tenantId)
+            || (isSignedIn()
+                && resource.data.userId == request.auth.uid
+                && !request.resource.data.diff(resource.data).affectedKeys()
+                     .hasAny(['paid', 'statusPagamento', 'dataPagamento', 'tenantId'])));
 
       allow delete: if isOwner(resource.data.tenantId)
         || (isSignedIn()

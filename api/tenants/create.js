@@ -3,6 +3,7 @@
 // (ignora as regras — a criação de tenants é exclusiva do backend).
 import { getAdminDb, getAdminAuth, FieldValue } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
+import { trialSubscription } from '../_shared/subscription.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 
@@ -31,9 +32,13 @@ export default async function handler(req, res) {
     const password = String(body.password || '');
     const pixKey = String(body.pixKey || '').trim();
     const betValue = Math.max(1, Number(body.betValue) || 15);
+    // E-mail real do organizador — o login continua sendo pelo WhatsApp, este
+    // endereço serve para os avisos de cobrança da assinatura.
+    const email = String(body.email || '').trim().toLowerCase();
 
     if (bolaoName.length < 3) return res.status(400).json({ error: 'Nome do bolão muito curto (mínimo 3 letras)' });
     if (!name) return res.status(400).json({ error: 'Informe o nome do organizador' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Informe um e-mail válido para os avisos de cobrança' });
     if (whatsapp.length < 10) return res.status(400).json({ error: 'WhatsApp inválido (use DDD + número)' });
     if (password.length < 6) return res.status(400).json({ error: 'Senha mínimo 6 caracteres' });
 
@@ -76,14 +81,17 @@ export default async function handler(req, res) {
     try {
       const batch = db.batch();
       batch.set(db.collection('users').doc(uid), {
-        name, whatsapp, isAdmin: false, balance: 0,
+        name, whatsapp, email, isAdmin: false, balance: 0,
         lastTenantId: slug,
         createdAt: FieldValue.serverTimestamp(),
       });
       batch.set(db.collection('tenants').doc(slug), {
         name: bolaoName,
         ownerId: uid,
+        ownerEmail: email,
+        ownerWhatsapp: whatsapp,
         plan: 'trial',
+        subscription: trialSubscription(),
         createdAt: FieldValue.serverTimestamp(),
       });
       batch.set(db.collection('tenants').doc(slug).collection('members').doc(uid), {
