@@ -11,16 +11,29 @@ import { sendEmail, layoutEmail } from '../_shared/email.js';
 // Confere na API em vez de confiar no corpo do webhook: qualquer um consegue
 // fazer um POST aqui, mas ninguém forja um pagamento aprovado na Woovi.
 async function confirmarNaWoovi(correlationID, appId) {
-  try {
-    const r = await axios.get(`https://api.woovi.com/api/v1/charge/${encodeURIComponent(correlationID)}`, {
-      headers: { Authorization: appId },
-      timeout: 8000,
-    });
-    return r.data?.charge?.status === 'COMPLETED';
-  } catch (err) {
-    console.error('billing/webhook: falha ao confirmar na Woovi:', err.message);
+  const r = await axios.get(`https://api.woovi.com/api/v1/charge/${encodeURIComponent(correlationID)}`, {
+    headers: { Authorization: appId },
+    timeout: 8000,
+    validateStatus: () => true,
+  });
+
+  // 401/403 aqui não é "não pago", é credencial sem permissão de LEITURA de
+  // cobrança. Tratar como não pago deixaria todo cliente que pagasse sem
+  // ativação, sem nenhum sinal de erro — separar o caso é o que torna esse
+  // problema de configuração visível no log.
+  if (r.status === 401 || r.status === 403) {
+    console.error(
+      `billing/webhook: CREDENCIAL SEM PERMISSAO DE LEITURA (HTTP ${r.status}). ` +
+      'A API key da Woovi precisa do escopo CHARGE_GET, senao nenhum pagamento e confirmado. ' +
+      `correlationID=${correlationID}`
+    );
     return false;
   }
+  if (r.status >= 400) {
+    console.error(`billing/webhook: consulta falhou (HTTP ${r.status}) correlationID=${correlationID}`);
+    return false;
+  }
+  return r.data?.charge?.status === 'COMPLETED';
 }
 
 export default async function handler(req, res) {
@@ -45,7 +58,11 @@ export default async function handler(req, res) {
     const tenantId = m[1];
 
     const appId = (process.env.LIONTECH_WOOVI_APP_ID || '').trim();
-    if (!appId || !(await confirmarNaWoovi(correlationID, appId))) {
+    if (!appId) {
+      console.error('billing/webhook: LIONTECH_WOOVI_APP_ID ausente — pagamento não confirmado');
+      return res.status(200).json({ received: true });
+    }
+    if (!(await confirmarNaWoovi(correlationID, appId))) {
       console.error('billing/webhook: pagamento não confirmado:', correlationID);
       return res.status(200).json({ received: true });
     }
