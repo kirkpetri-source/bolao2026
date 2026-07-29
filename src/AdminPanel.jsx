@@ -140,7 +140,9 @@ const PlataformaTab = () => {
     trial:      ['bg-ouro-100 text-ouro-700',     'Em teste'],
     overdue:    ['bg-orange-100 text-orange-700', 'Vencido'],
     blocked:    ['bg-red-100 text-red-700',       'Bloqueado'],
-    plataforma: ['bg-noite-100 text-noite-600',   'Plataforma'],
+    // O fundo -100 não é convertido no dark mode, mas text-noite-600 é: sem a
+    // cor literal, o rótulo ficaria claro sobre fundo claro.
+    plataforma: ['bg-noite-100 text-[#374151]',   'Plataforma'],
   };
 
   const cartoes = [
@@ -256,11 +258,14 @@ const SubscriptionBanner = ({ onStatus }) => {
   const faltam = daysUntil(accessEndsAt(sub));
   const valor = ((Number(sub.priceCents) || 0) / 100).toFixed(2).replace('.', ',');
 
+  // Cada tom precisa do par claro/escuro: os fundos -50 não são convertidos pelo
+  // index.css, então sem a variante dark eles ficam claros enquanto o texto é
+  // forçado para quase branco — e o aviso some.
   const tom = status === STATUS.BLOCKED
-    ? { caixa: 'bg-red-50 border-red-300', titulo: 'text-red-800', texto: 'text-red-700' }
+    ? { caixa: 'bg-red-50 border-red-300 dark:bg-red-500/10 dark:border-red-500/40', titulo: 'text-red-800 dark:text-red-300', texto: 'text-red-700 dark:text-red-200' }
     : status === STATUS.OVERDUE
-      ? { caixa: 'bg-orange-50 border-orange-300', titulo: 'text-orange-800', texto: 'text-orange-700' }
-      : { caixa: 'bg-ouro-50 border-ouro-500', titulo: 'text-noite-900', texto: 'text-noite-600' };
+      ? { caixa: 'bg-orange-50 border-orange-300 dark:bg-orange-500/10 dark:border-orange-500/40', titulo: 'text-orange-800 dark:text-orange-300', texto: 'text-orange-700 dark:text-orange-200' }
+      : { caixa: 'bg-ouro-50 border-ouro-500 dark:bg-ouro-500/10', titulo: 'text-noite-900', texto: 'text-noite-600' };
 
   const titulo = status === STATUS.BLOCKED
     ? 'Bolão bloqueado por falta de pagamento'
@@ -313,7 +318,7 @@ const SubscriptionBanner = ({ onStatus }) => {
         </div>
         {!pix && (
           <button onClick={pagar} disabled={busy}
-            className="px-5 py-2.5 rounded-lg font-semibold text-noite-900 bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 flex-shrink-0">
+            className="px-5 py-2.5 rounded-lg font-semibold text-[#0a0f1a] bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 flex-shrink-0">
             {busy ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
             {busy ? 'Gerando...' : 'Ativar meu bolão'}
           </button>
@@ -324,11 +329,13 @@ const SubscriptionBanner = ({ onStatus }) => {
 
       {pix && (
         <div className="mt-4 pt-4 border-t border-black/10 flex flex-col sm:flex-row gap-5 items-center">
-          {pix.qrCodeImage && <img src={pix.qrCodeImage} alt="QR Code do PIX" className="w-44 h-44 bg-white rounded-xl p-2" />}
+          {/* Branco literal: no dark mode o index.css converte bg-white em cor de
+              card, e QR Code sobre fundo escuro não é lido pela câmera. */}
+          {pix.qrCodeImage && <img src={pix.qrCodeImage} alt="QR Code do PIX" className="w-44 h-44 bg-[#ffffff] rounded-xl p-2" />}
           <div className="flex-1 w-full">
             <p className="text-sm font-semibold text-noite-800 mb-2">Pague o PIX para ativar. A liberação é automática.</p>
             <textarea readOnly value={pix.brCode || ''} rows={3}
-              className="w-full text-xs font-mono p-2 rounded-lg border border-black/10 bg-white/70 resize-none" />
+              className="w-full text-xs font-mono p-2 rounded-lg border border-black/10 bg-[#ffffff] text-[#0a0f1a] resize-none" />
             <button onClick={copiar} className="mt-2 px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2 bg-white">
               <Copy size={14} /> {copiado ? 'Copiado!' : 'Copiar código PIX'}
             </button>
@@ -456,7 +463,7 @@ const WhatsAppConnectCard = () => {
         <div>
           {qrSrc ? (
             <div className="flex flex-col sm:flex-row gap-5 items-center">
-              <img src={qrSrc} alt="QR Code para conectar o WhatsApp" className="w-52 h-52 border rounded-xl bg-white p-2" />
+              <img src={qrSrc} alt="QR Code para conectar o WhatsApp" className="w-52 h-52 border rounded-xl bg-[#ffffff] p-2" />
               <div className="text-sm text-gray-600 space-y-2">
                 <p className="font-semibold text-gray-800">Escaneie com o celular do bolão:</p>
                 <ol className="list-decimal pl-5 space-y-1">

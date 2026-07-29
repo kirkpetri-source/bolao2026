@@ -843,7 +843,10 @@ const LoginScreen = ({ setView }) => {
               <p className="text-noite-500 text-sm leading-relaxed mb-4">
                 Monte o seu, convide a galera e administre rodadas, pagamentos e resultados pelo painel do organizador.
               </p>
-              <button onClick={() => setView('onboard')} className="w-full py-3 rounded-xl font-semibold text-noite-900 bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2">
+              {/* Cor literal, e não text-noite-900: o index.css força
+                  .dark .text-noite-900 para quase branco com !important, o que
+                  no dark mode deixaria texto branco sobre o dourado sólido. */}
+              <button onClick={() => setView('onboard')} className="w-full py-3 rounded-xl font-semibold text-[#0a0f1a] bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2">
                 <Trophy size={18} /> Criar meu bolão
               </button>
             </div>
