@@ -142,6 +142,57 @@ const RecebimentoAutomaticoCard = () => {
   );
 };
 
+// Convite do bolao: link pronto e mensagem pronta. E o ultimo passo antes de o
+// bolao ganhar vida, entao precisa estar a um clique — nao escondido numa aba.
+const ConviteCard = () => {
+  const { tenantId, settings } = useApp();
+  const [copiado, setCopiado] = useState('');
+
+  const nome = settings?.brandName || 'Nosso bolão';
+  const url = inviteUrl(tenantId);
+  const mensagem = inviteMessage(nome, url);
+
+  const copiar = async (texto, qual) => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(qual);
+      setTimeout(() => setCopiado(''), 2000);
+    } catch { /* sem clipboard: o texto está visível para copiar à mão */ }
+  };
+
+  return (
+    <div data-tour="convite" className="bg-white rounded-xl shadow-sm border p-6">
+      <h3 className="text-lg font-bold mb-2">Convide seus participantes</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Quem abrir este link cai direto no cadastro do <strong>seu</strong> bolão.
+      </p>
+
+      <label className="v2-label">Link do seu bolão</label>
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
+        <input type="text" readOnly value={url} onFocus={(e) => e.target.select()}
+          className="v2-input flex-1 font-mono text-xs" />
+        <button onClick={() => copiar(url, 'link')} className="v2-btn-outline px-4 py-2.5 text-sm whitespace-nowrap">
+          <Copy size={15} /> {copiado === 'link' ? 'Copiado!' : 'Copiar link'}
+        </button>
+      </div>
+
+      <label className="v2-label">Mensagem pronta para o grupo</label>
+      <textarea readOnly value={mensagem} rows={7} onFocus={(e) => e.target.select()}
+        className="v2-input w-full text-sm mb-3 resize-none" />
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <a href={`https://wa.me/?text=${encodeURIComponent(mensagem)}`} target="_blank" rel="noopener noreferrer"
+          className="v2-btn-primary px-5 py-2.5 text-sm justify-center">
+          <Send size={16} /> Enviar pelo WhatsApp
+        </a>
+        <button onClick={() => copiar(mensagem, 'msg')} className="v2-btn-outline px-5 py-2.5 text-sm">
+          <Copy size={15} /> {copiado === 'msg' ? 'Copiada!' : 'Copiar mensagem'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Mensalidade da plataforma: gera o PIX e mostra a situação. Fica também em
 // Configurações porque é para lá que o bolão bloqueado é mandado — o único
 // lugar que ele ainda abre.
