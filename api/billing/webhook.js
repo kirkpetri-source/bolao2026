@@ -5,7 +5,8 @@ import axios from 'axios';
 import { getAdminDb, FieldValue } from '../_shared/firebaseAdmin.js';
 import { getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
-import { STATUS, renewedPeriodEnd, trialSubscription } from '../_shared/subscription.js';
+import { STATUS, renewedPeriodEnd, trialSubscription, evaluateStatus } from '../_shared/subscription.js';
+import { separarPorAntecedencia, mensagemDeEntrada } from '../_shared/roundsAccess.js';
 import { sendEmail, layoutEmail } from '../_shared/email.js';
 
 // Confere na API em vez de confiar no corpo do webhook: qualquer um consegue
@@ -104,6 +105,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ received: true, jaProcessado: true });
     }
 
+    // Precisa ser lido ANTES da atualização: depois de gravar 'active' não há
+    // mais como saber se o bolão vinha bloqueado.
+    const eraBloqueado = evaluateStatus(sub) === STATUS.BLOCKED;
+
     const novoFim = renewedPeriodEnd(sub);
     await ref.update({
       'subscription.status': STATUS.ACTIVE,
@@ -119,9 +124,34 @@ export default async function handler(req, res) {
     const ate = new Date(novoFim).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     const nome = tenant.name || 'seu bolão';
 
+    // Só quem estava BLOQUEADO passa pela regra de antecedência. Quem apenas
+    // renovou em dia continua na rodada em que já estava jogando — fechá-la
+    // seria punir quem pagou antes de vencer.
+    let avisoRodada = '';
+    if (eraBloqueado) {
+      const snapRodadas = await db.collection('rounds').where('tenantId', '==', tenantId).get();
+      const rodadas = snapRodadas.docs.map(d => ({ id: d.id, ...d.data() }));
+      const separadas = separarPorAntecedencia(rodadas);
+      avisoRodada = mensagemDeEntrada(separadas);
+
+      // Fecha de fato as que começam cedo demais, senão a regra existiria só no
+      // texto e os participantes ainda conseguiriam palpitar nelas.
+      for (const r of separadas.tardeDemais) {
+        await db.collection('rounds').doc(r.id).update({
+          status: 'closed',
+          notificacaoFechamentoEnviada: true,
+        });
+      }
+      if (separadas.tardeDemais.length) {
+        console.log(`billing/webhook: ${tenantId} reativado — rodada(s) ${separadas.tardeDemais.map(r => r.number).join(', ')} fechadas por antecedência`);
+      }
+    }
+
     const destino = formatPhone(tenant.ownerWhatsapp || '');
     if (destino) {
-      const texto = `✅ *Assinatura confirmada!*\n\nO ${nome} está ativo até ${ate}.\n\nObrigado!`;
+      const texto = `✅ *Assinatura confirmada!*\n\nO ${nome} está ativo até ${ate}.`
+        + (avisoRodada ? `\n\n⚠️ ${avisoRodada}` : '')
+        + `\n\nObrigado!`;
       try {
         await sendWhatsApp(destino, texto, await getSettings(DEFAULT_TENANT_ID));
       } catch (e) {
@@ -138,6 +168,7 @@ export default async function handler(req, res) {
           paragrafos: [
             `O <strong>${nome}</strong> está ativo até <strong>${ate}</strong>.`,
             'As ferramentas do painel foram liberadas e os participantes já podem enviar palpites.',
+            ...(avisoRodada ? [avisoRodada] : []),
           ],
         }),
         // Uma confirmação por cobrança, mesmo que a Woovi reentregue o evento.
