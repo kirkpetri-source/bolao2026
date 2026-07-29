@@ -3966,8 +3966,10 @@ const AdminPanel = ({ setView }) => {
     { id: 'financial',      label: 'Financeiro',       icon: <DollarSign size={18} />},
     { id: 'communications', label: 'Comunicados',      icon: <Megaphone size={18} /> },
     { id: 'settings',       label: 'Configurações',    icon: <Edit2 size={18} />     },
-    // Carteira da plataforma: só o dono do SaaS, nunca o dono de um bolão.
-    ...(currentUser?.globalAdmin ? [{ id: 'plataforma', label: 'Plataforma', icon: <DollarSign size={18} /> }] : []),
+    // A carteira da plataforma NÃO mora aqui: administrar o SaaS e administrar
+    // um bolão são trabalhos diferentes, e misturá-los numa aba foi o que fez
+    // a operação da Lion Tech ficar a um clique de dentro do bolão de cliente.
+    // O console vive em /plataforma.
   ];
   const activeTabLabel = adminTabMeta.find(t => t.id === activeTab)?.label || '';
 
@@ -4452,8 +4454,6 @@ const AdminPanel = ({ setView }) => {
             )}
           </div>
         )}
-
-        {activeTab === 'plataforma' && currentUser?.globalAdmin && <PlataformaTab />}
 
         {activeTab === 'settings' && (
           <div>

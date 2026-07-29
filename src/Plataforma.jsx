@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Trophy, LogOut, ShieldAlert, Loader2 } from 'lucide-react';
 import { useApp } from './AppContext.js';
-import { loginWithWhatsapp } from './authService.js';
+import { loginWithEmail } from './authService.js';
 import { PlataformaTab } from './AdminPanel.jsx';
 
 // Console da plataforma, em /plataforma.
@@ -13,7 +13,7 @@ import { PlataformaTab } from './AdminPanel.jsx';
 // mas ela permite um login próprio e evita exposição acidental.
 export default function Plataforma() {
   const { currentUser, logout } = useApp();
-  const [whatsapp, setWhatsapp] = useState('');
+  const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState('');
   const [entrando, setEntrando] = useState(false);
@@ -21,7 +21,7 @@ export default function Plataforma() {
   const entrar = async () => {
     setErro(''); setEntrando(true);
     try {
-      await loginWithWhatsapp(whatsapp, senha);
+      await loginWithEmail(email, senha);
     } catch (e) {
       setErro('Não foi possível entrar. Confira os dados.');
     } finally {
@@ -45,12 +45,13 @@ export default function Plataforma() {
             {erro && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg mb-4 text-sm">{erro}</div>}
             <div className="space-y-3">
               <div>
-                <label className="v2-label">Usuário</label>
-                <input type="tel" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, ''))} className="v2-input" />
+                <label className="v2-label">E-mail</label>
+                <input type="email" autoComplete="username" value={email}
+                  onChange={(e) => setEmail(e.target.value)} className="v2-input" />
               </div>
               <div>
                 <label className="v2-label">Senha</label>
-                <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
+                <input type="password" autoComplete="current-password" value={senha} onChange={(e) => setSenha(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && entrar()} className="v2-input" />
               </div>
               <button onClick={entrar} disabled={entrando} className="v2-btn-primary w-full py-3 disabled:opacity-60">

@@ -21,6 +21,17 @@ function auth() { return getAuth(app); }
 function db() { return getFirestore(app); }
 
 // Faz login e retorna o doc de /users (com id). Lança erro em credenciais inválidas.
+// Login da área da plataforma: e-mail real, não o sintético do WhatsApp. A
+// conta que opera o SaaS não deve compartilhar credencial com nenhum bolão.
+export async function loginWithEmail(email, password) {
+  const limpo = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(limpo)) throw new Error('E-mail inválido');
+  const cred = await signInWithEmailAndPassword(auth(), limpo, password);
+  const snap = await getDoc(doc(db(), 'users', cred.user.uid));
+  if (!snap.exists()) throw new Error('Conta autenticada sem cadastro.');
+  return { id: cred.user.uid, ...snap.data() };
+}
+
 export async function loginWithWhatsapp(whatsapp, password) {
   const email = whatsappToEmail(whatsapp);
   if (!email) throw new Error('WhatsApp inválido');

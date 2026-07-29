@@ -292,14 +292,28 @@ const AppProvider = ({ children }) => {
           // se cadastrou/usou por último; senão, o que já está resolvido.
           let hasUrlTenant = false;
           try { hasUrlTenant = !!new URL(window.location.href).searchParams.get('t'); } catch {}
-          const tid = (!hasUrlTenant && data.lastTenantId) ? data.lastTenantId : tenantId;
-          if (tid !== tenantId) { setTenantId(tid); rememberTenant(tid); }
+          let tid = (!hasUrlTenant && data.lastTenantId) ? data.lastTenantId : tenantId;
 
-          let role = null;
-          try {
-            const mem = await getDoc(doc(db, 'tenants', tid, 'members', fbUser.uid));
-            role = mem.exists() ? mem.data().role : null;
-          } catch (e) { console.warn('membership:', e); }
+          const papelEm = async (t) => {
+            try {
+              const mem = await getDoc(doc(db, 'tenants', t, 'members', fbUser.uid));
+              return mem.exists() ? mem.data().role : null;
+            } catch (e) { console.warn('membership:', e); return null; }
+          };
+
+          let role = await papelEm(tid);
+
+          // Se a pessoa não pertence ao bolão que ficou guardado no navegador,
+          // ela NÃO pode cair dentro dele. Isso acontecia com a conta da
+          // plataforma: como ela enxerga tudo para dar suporte, abrir um bolão
+          // de cliente por acidente mostrava o painel dele completo, com botões
+          // de marcar pago e cobrar. Volta para o bolão próprio.
+          if (!role && data.lastTenantId && data.lastTenantId !== tid) {
+            const papelProprio = await papelEm(data.lastTenantId);
+            if (papelProprio) { tid = data.lastTenantId; role = papelProprio; }
+          }
+
+          if (tid !== tenantId) { setTenantId(tid); rememberTenant(tid); }
 
           // Operar a plataforma e administrar um bolão são papéis distintos:
           // o primeiro é da Lion Tech, o segundo é de cada cliente. Antes os
@@ -308,7 +322,10 @@ const AppProvider = ({ children }) => {
           const globalAdmin = tok.claims.platformAdmin === true || data.platformAdmin === true;
           setCurrentUser({
             id: fbUser.uid, ...data,
-            isAdmin: globalAdmin || role === 'owner',
+            // Administrar ESTE bolão depende de ser dono DELE, e não de operar
+            // a plataforma. Antes o operador virava admin de qualquer bolão em
+            // que caísse, com os botões de cobrança à mão.
+            isAdmin: role === 'owner',
             globalAdmin,
             tenantRole: role,
           });
@@ -1063,6 +1080,23 @@ function App() {
 
   // A rota da plataforma tem tela própria e não passa pelo fluxo do bolão.
   if (naPlataforma) return <Plataforma />;
+
+  // Conta que só opera a plataforma não tem bolão para abrir: em vez de cair
+  // num painel vazio (ou no de outra pessoa), vai para o console dela.
+  if (currentUser?.globalAdmin && !currentUser?.tenantRole) {
+    return (
+      <div className="min-h-screen page-bg flex items-center justify-center p-6 font-body">
+        <div className="bg-white rounded-2xl border p-8 max-w-md text-center">
+          <h1 className="font-display text-xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>CONTA DA PLATAFORMA</h1>
+          <p className="text-sm text-noite-500 mb-5">
+            Esta conta administra o SaaS, não um bolão. O console fica em uma
+            área separada.
+          </p>
+          <a href="/plataforma" className="v2-btn-primary px-5 py-2.5 text-sm">Abrir o console</a>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
   if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
