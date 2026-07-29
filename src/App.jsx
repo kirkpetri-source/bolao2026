@@ -155,6 +155,9 @@ const AppProvider = ({ children }) => {
   // Tenant atual: link de convite (?t=) > último usado > padrão. Após o login,
   // pode trocar para o lastTenantId do usuário (ver observer de Auth abaixo).
   const [tenantId, setTenantId] = useState(() => resolveTenantId());
+  // Endereço de bolão que não existe: melhor dizer isso do que mostrar uma
+  // tela vazia que parece defeito do sistema.
+  const [bolaoInexistente, setBolaoInexistente] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);            // usuários globais (identidade)
   const [tenantMembers, setTenantMembers] = useState([]); // membros do tenant atual
@@ -264,6 +267,7 @@ const AppProvider = ({ children }) => {
     // Sem bolão na URL nem no histórico, a raiz é a página de entrada: não há
     // configuração para buscar e nada deve ser carregado do bolão padrão.
     if (!tenantId) { setSettings(null); return; }
+    setBolaoInexistente(false);
     const isAdmin = !!currentUser?.isAdmin;
     let unsub;
     if (isAdmin) {
@@ -276,8 +280,28 @@ const AppProvider = ({ children }) => {
         }
       });
     } else {
-      unsub = onSnapshot(doc(db, 'public_config', publicConfigDocId(tenantId)), snap => {
-        setSettings(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+      unsub = onSnapshot(doc(db, 'public_config', publicConfigDocId(tenantId)), async snap => {
+        if (snap.exists()) { setSettings({ id: snap.id, ...snap.data() }); return; }
+
+        // Endereço não encontrado como está. Antes de desistir, tenta a forma
+        // sem hífen — "/bolaododeryck" é como as pessoas digitam de cabeça.
+        try {
+          const semHifen = tenantId.replace(/-/g, '');
+          const achado = await getDocs(query(collection(db, 'public_config'), where('slugPlano', '==', semHifen), limit(1)));
+          if (!achado.empty) {
+            const certo = achado.docs[0].data().tenantId || achado.docs[0].id;
+            if (certo !== tenantId) {
+              rememberTenant(certo);
+              setTenantId(certo);
+              // Corrige a barra de endereço para o formato canônico.
+              try { window.history.replaceState({}, '', `/${certo}`); } catch {}
+              return;
+            }
+          }
+        } catch (e) { console.warn('busca de bolão:', e); }
+
+        setSettings(null);
+        setBolaoInexistente(true);
       });
     }
     return () => { if (unsub) unsub(); };
@@ -405,7 +429,7 @@ const AppProvider = ({ children }) => {
 
   const value = {
     currentUser, setCurrentUser, users: tenantUsers, teams, rounds, predictions, establishments, settings, communications, teamImportRequests, loading,
-    tenantId, tenantMembers, login, logout, darkMode, toggleDark,
+    tenantId, tenantMembers, bolaoInexistente, login, logout, darkMode, toggleDark,
     addUser: async (d) => {
       const normalizeWhatsapp = (s) => {
         const str = (s || '').replace(/\D/g, '');
@@ -1063,7 +1087,7 @@ function ehRotaDaPlataforma() {
 }
 
 function App() {
-  const { currentUser, loading, settings, tenantId } = useApp();
+  const { currentUser, loading, settings, tenantId, bolaoInexistente } = useApp();
   const [view, setView] = useState('login');
   const naPlataforma = ehRotaDaPlataforma();
 
@@ -1125,6 +1149,26 @@ function App() {
   // impedia que quem digitasse só o endereço do site fosse parar no bolão de
   // teste da plataforma, que não tem organizador para cobrar nem premiar.
   if (!tenantId && !currentUser) return <Entrada setView={setView} />;
+
+  // Endereço digitado errado. Dizer isso evita que a pessoa fique olhando uma
+  // tela vazia achando que o sistema quebrou.
+  if (bolaoInexistente && !currentUser) {
+    return (
+      <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
+        <div className="bg-white rounded-2xl border shadow-modal max-w-md w-full p-7 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-ouro-50 flex items-center justify-center mx-auto mb-4">
+            <Search size={26} className="text-ouro-600" />
+          </div>
+          <h1 className="font-display text-xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>BOLÃO NÃO ENCONTRADO</h1>
+          <p className="text-sm text-noite-500 leading-relaxed mb-5">
+            Não existe bolão neste endereço. Confira o link que o organizador
+            enviou — o endereço certo termina com o nome do bolão.
+          </p>
+          <a href="/" className="v2-btn-primary px-5 py-2.5 text-sm">Ir para a página inicial</a>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
   // Gating global: se manutenção estiver ativa, usuários logados não-admin são direcionados à tela de manutenção
