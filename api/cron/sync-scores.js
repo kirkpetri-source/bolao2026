@@ -4,6 +4,7 @@ import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
 } from '../_shared/firestore.js';
 import { listTenants, getUsersById } from '../_shared/tenant.js';
+import { isMatchPostponed, matchCountsForScoring } from '../_shared/matchStatus.js';
 
 // Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
 function calcPoints(predHome, predAway, realHome, realAway) {
@@ -108,11 +109,11 @@ async function finalizeRound(roundId, roundData, settings, userNames) {
     if (Array.isArray(pred.predictions)) {
       for (const p of pred.predictions) {
         const match = roundData.matches?.find(m => m.id === p.matchId || m.apiEventId === p.apiEventId);
-        if (match?.finished) predPts += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
+        if (matchCountsForScoring(match)) predPts += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
       }
     } else if (pred.matchId !== undefined) {
       const match = roundData.matches?.find(m => m.id === pred.matchId);
-      if (match?.finished) predPts = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
+      if (matchCountsForScoring(match)) predPts = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
     }
 
     await updateDoc(predDoc.ref, { points: predPts });
@@ -290,7 +291,8 @@ export default async function handler(req, res) {
           }));
           logs.push(`[DRY RUN] [${tenant.id}] Rodada ${roundNum}: placares ${scoresChanged ? 'teriam sido atualizados' : 'sem alteração'}`);
 
-          const allDone = updatedMatches.every(m => m.finished);
+          // Adiado conta como resolvido: esperar placar dele travava a rodada.
+        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m));
           if (allDone && !round.resultadoCalculado) {
             // Simular cálculo de pontos para o relatório
             const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', round.id)));
@@ -302,11 +304,11 @@ export default async function handler(req, res) {
               if (Array.isArray(pred.predictions)) {
                 for (const p of pred.predictions) {
                   const match = updatedMatches.find(m => m.id === p.matchId || m.apiEventId === p.apiEventId);
-                  if (match?.finished) totalPoints += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
+                  if (matchCountsForScoring(match)) totalPoints += calcPoints(p.homeScore, p.awayScore, match.homeScore, match.awayScore);
                 }
               } else if (pred.matchId !== undefined) {
                 const match = updatedMatches.find(m => m.id === pred.matchId);
-                if (match?.finished) totalPoints = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
+                if (matchCountsForScoring(match)) totalPoints = calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
               }
               const uid = pred.userId;
               if (!userPoints[uid]) userPoints[uid] = { name: userNames[uid] || 'Participante', points: 0 };
@@ -336,7 +338,7 @@ export default async function handler(req, res) {
               tenant: tenant.id,
               round: roundName,
               roundId: round.id,
-              allMatchesFinished: updatedMatches.every(m => m.finished),
+              allMatchesFinished: updatedMatches.every(m => m.finished || isMatchPostponed(m)),
               scoresChanged,
               matches: matchReport,
               action: allDone && round.resultadoCalculado
@@ -356,7 +358,8 @@ export default async function handler(req, res) {
           logs.push(`[${tenant.id}] Rodada ${roundNum}: placares atualizados`);
         }
 
-        const allDone = updatedMatches.every(m => m.finished);
+        // Adiado conta como resolvido: esperar placar dele travava a rodada.
+        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m));
         if (allDone && !round.resultadoCalculado) {
           logs.push(`[${tenant.id}] Rodada ${roundNum}: todos os jogos terminaram — finalizando...`);
           await finalizeRound(round.id, { ...round, matches: updatedMatches }, settings, userNames);

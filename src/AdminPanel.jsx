@@ -11,6 +11,7 @@ import GuidedTour from './components/GuidedTour.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
+import { isMatchPostponed, resumoDaRodada } from '../api/_shared/matchStatus.js';
 import { inviteUrl, inviteMessage } from './tenant.js';
 import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
 
@@ -4012,14 +4013,25 @@ const AdminPanel = ({ setView }) => {
           {/* Jogos expandidos */}
           {isExpanded && (
             <div className="mt-4 pt-4 border-t space-y-1.5">
+              {(() => {
+                const r = resumoDaRodada(round.matches || []);
+                if (!r.adiados) return null;
+                return (
+                  <div className="bg-orange-50 border border-orange-200 text-orange-800 rounded-lg px-3 py-2 text-sm mb-2">
+                    <strong>{r.adiados} jogo(s) adiado(s).</strong> Esta rodada vale {r.valendo} de {r.total} jogos —
+                    os adiados saíram do palpite e não pontuam para ninguém.
+                  </div>
+                );
+              })()}
               {[...(round.matches || [])].sort(sortMatchesByDate).map((match) => {
                 const homeTeam = teams.find(t => t.id === match.homeTeamId);
                 const awayTeam = teams.find(t => t.id === match.awayTeamId);
                 const homeName = homeTeam?.name || match.homeTeamName || '?';
                 const awayName = awayTeam?.name || match.awayTeamName || '?';
+                const adiado = isMatchPostponed(match);
                 return (
-                  <div key={match.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                    <div className="flex items-center gap-2 min-w-0">
+                  <div key={match.id} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${adiado ? 'bg-orange-50 border border-orange-200' : 'bg-gray-50'}`}>
+                    <div className={`flex items-center gap-2 min-w-0 ${adiado ? 'opacity-60' : ''}`}>
                       <img src={getSafeLogo(homeTeam || { logo: match.homeTeamLogo })} alt={homeName} className="w-6 h-6 object-contain rounded bg-white ring-1 ring-gray-200 flex-shrink-0" width={24} height={24} />
                       <span className="font-medium truncate max-w-[80px] sm:max-w-none">{homeName}</span>
                       {isMatchEffectivelyFinished(match) && match.homeScore !== null ? (
@@ -4030,7 +4042,12 @@ const AdminPanel = ({ setView }) => {
                       <img src={getSafeLogo(awayTeam || { logo: match.awayTeamLogo })} alt={awayName} className="w-6 h-6 object-contain rounded bg-white ring-1 ring-gray-200 flex-shrink-0" width={24} height={24} />
                       <span className="font-medium truncate max-w-[80px] sm:max-w-none">{awayName}</span>
                     </div>
-                    {match.date && (
+                    {adiado && (
+                      <span className="flex-shrink-0 ml-2 text-[10px] font-bold uppercase px-2 py-1 rounded-full bg-orange-100 text-orange-700" style={{ letterSpacing: '0.08em' }}>
+                        Adiado · não vale pontos
+                      </span>
+                    )}
+                    {!adiado && match.date && (
                       <span className="text-xs text-gray-400 flex-shrink-0 ml-2">
                         {new Date(match.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })}
                       </span>

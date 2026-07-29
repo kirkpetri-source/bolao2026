@@ -1,6 +1,7 @@
 import { db, getSettings, sendWhatsApp, sendWhatsAppDocument, formatPhone } from '../_shared/firebase.js';
 import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from '../_shared/firestore.js';
 import { DEFAULT_TENANT_ID, listTenants, getUsersById, getTenantParticipants } from '../_shared/tenant.js';
+import { matchCountsForScoring } from '../_shared/matchStatus.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 // Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente.
@@ -135,6 +136,7 @@ async function calcRoundRanking(roundId, roundMatches, nameMap) {
     for (const pred of c.preds) {
       const match = roundMatches.find(m => m.id === pred.matchId);
       if (!match || match.homeScore == null || match.awayScore == null) continue;
+      if (!matchCountsForScoring(match)) continue;  // adiado nao vale para ninguem
       pts += calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
     }
     return {

@@ -7,6 +7,7 @@
 // cartela e pontos.
 import { getAdminDb } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
+import { matchCountsForScoring } from '../_shared/matchStatus.js';
 
 // Mesma regra de pontuação da tela.
 function calcPoints(ph, pa, rh, ra) {
@@ -70,7 +71,7 @@ export default async function handler(req, res) {
       let pts = 0;
       for (const pred of c.preds) {
         const jogo = (round.matches || []).find(m => m.id === pred.matchId);
-        if (!jogo || jogo.homeScore == null || jogo.awayScore == null) continue;
+        if (!matchCountsForScoring(jogo)) continue;  // adiado fora da conta
         pts += calcPoints(pred.homeScore, pred.awayScore, jogo.homeScore, jogo.awayScore);
       }
       return { name: nomes[c.userId] || 'Participante', cartelaCode: c.cartelaCode, points: pts };

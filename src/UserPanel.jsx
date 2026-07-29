@@ -5,6 +5,7 @@ import { db } from './firebase.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
+import { isMatchPostponed } from '../api/_shared/matchStatus.js';
 import { changeMyPassword, authErrorMessage } from './authService.js';
 import { isBlocked } from '../api/_shared/subscription.js';
 
@@ -530,6 +531,10 @@ const UserPanel = ({ setView }) => {
     const [localPreds, setLocalPreds] = useState({});
     const [cartelaCode] = useState(generateCartelaCode());
     const timedClosed = isRoundTimedClosed(round);
+    // Adiado nao entra no formulario nem na cartela: nao vai acontecer e nao
+    // pontua para ninguem, entao pedir palpite seria so frustracao.
+    const jogosAdiados = (round?.matches || []).filter(isMatchPostponed);
+    const jogosValendo = (round?.matches || []).filter(m => !isMatchPostponed(m));
     
     useEffect(() => {
       if (initialPredictions) {
@@ -553,7 +558,7 @@ const UserPanel = ({ setView }) => {
         alert('Rodada sem jogos configurados. Aguarde o administrador adicionar os confrontos.');
         return;
       }
-      const allPreds = round.matches.map(match => ({
+      const allPreds = round.matches.filter(m => !isMatchPostponed(m)).map(match => ({
         match,
         homeScore: localPreds[match.id]?.home !== undefined ? parseInt(localPreds[match.id].home) : null,
         awayScore: localPreds[match.id]?.away !== undefined ? parseInt(localPreds[match.id].away) : null
@@ -603,7 +608,16 @@ const UserPanel = ({ setView }) => {
                 🔒 Rodada fechada automaticamente {round.closeAt && (<span>em {formatDateTime(round.closeAt) || round.closeAt}</span>)}.
               </div>
             )}
-            {[...(round.matches || [])].sort(sortMatchesByDate).map((match) => {
+            {/* Jogos adiados ficam de fora: pedir palpite para partida que nao
+                vai acontecer so gera frustracao, e ela nao pontua para ninguem. */}
+            {jogosAdiados.length > 0 && (
+              <div className="bg-orange-50 border border-orange-200 text-orange-800 px-4 py-3 rounded-lg text-sm">
+                <strong>{jogosAdiados.length} jogo(s) adiado(s)</strong> nesta rodada e fora do palpite:
+                {' '}{jogosAdiados.map(m => `${m.homeTeamName} x ${m.awayTeamName}`).join(', ')}.
+                {' '}Sua cartela vale {jogosValendo.length} jogo(s).
+              </div>
+            )}
+            {[...jogosValendo].sort(sortMatchesByDate).map((match) => {
               const homeTeam = teams.find(t => t.id === match.homeTeamId);
               const awayTeam = teams.find(t => t.id === match.awayTeamId);
               return (
