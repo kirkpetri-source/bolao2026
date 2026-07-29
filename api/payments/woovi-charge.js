@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { db, getSettings } from '../_shared/firebase.js';
-import { collection, getDocs, query, where } from '../_shared/firestore.js';
+import { doc, getDoc } from '../_shared/firestore.js';
+import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 
 const WOOVI_API = 'https://api.openpix.com.br/api/v1';
 
@@ -15,8 +16,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    const settings = await getSettings();
-    const appId = settings?.woovi?.appId || process.env.WOOVI_APP_ID;
+    // O tenant sai da rodada, nunca do corpo da requisição: é ele que decide
+    // para qual conta Woovi o dinheiro vai, então não pode vir do cliente.
+    const roundSnap = await getDoc(doc(db, 'rounds', roundId));
+    if (!roundSnap.exists()) {
+      return res.status(404).json({ error: 'Rodada não encontrada' });
+    }
+    const round = roundSnap.data();
+    const tenantId = round.tenantId || DEFAULT_TENANT_ID;
+    const roundName = round.name || `Rodada ${roundId}`;
+
+    const settings = await getSettings(tenantId);
+    // O fallback de env só vale para o bolão original; um tenant novo sem Woovi
+    // configurado precisa falhar, e não cair na conta de outro organizador.
+    const appId = settings?.woovi?.appId
+      || (tenantId === DEFAULT_TENANT_ID ? process.env.WOOVI_APP_ID : '');
 
     if (!appId) {
       return res.status(400).json({ error: 'Woovi não configurado. Adicione o App ID nas configurações.' });
@@ -25,11 +39,6 @@ export default async function handler(req, res) {
     // Usar valor das settings ou do body
     const betValue = amount || settings?.betValue || 15;
     const valueInCents = Math.round(parseFloat(betValue) * 100);
-
-    // Buscar nome da rodada
-    const roundsSnap = await getDocs(collection(db, 'rounds'));
-    const roundDoc = roundsSnap.docs.find(d => d.id === roundId);
-    const roundName = roundDoc?.data()?.name || `Rodada ${roundId}`;
 
     // Criar cobrança na Woovi
     const payload = {
