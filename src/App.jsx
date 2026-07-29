@@ -817,17 +817,34 @@ const LoginScreen = ({ setView }) => {
             </div>
             <div className="pt-2 space-y-3">
               <button onClick={handleLogin} className="v2-btn-primary w-full py-3.5 text-base">Entrar</button>
-              <button onClick={() => { setError(''); setShowForgot(true); }} className="v2-btn-ghost w-full py-2 text-sm">
-                Esqueci minha senha
-              </button>
+              <div className="flex items-center justify-center gap-3 text-sm">
+                <button onClick={() => { setError(''); setShowForgot(true); }} className="text-noite-400 hover:text-campo-600 transition-colors">
+                  Esqueci minha senha
+                </button>
+                <span className="text-noite-200">•</span>
+                <button onClick={() => setShowRulesModal(true)} className="text-noite-400 hover:text-campo-600 transition-colors">
+                  Ver regras
+                </button>
+              </div>
               <button onClick={() => { setShowRegister(true); setError(''); }} className="v2-btn-outline w-full py-3">
-                <UserPlus size={18} /> Criar Conta
+                <UserPlus size={18} /> Criar conta de participante
               </button>
-              <button onClick={() => setShowRulesModal(true)} className="v2-btn-ghost w-full py-2.5 text-sm">
-                <FileText size={16} /> Ver Regras
-              </button>
-              <button onClick={() => setView('onboard')} className="v2-btn-ghost w-full py-2.5 text-sm">
-                <Trophy size={16} /> Quero criar meu próprio bolão
+            </div>
+          </div>
+
+          {/* Caminho do organizador: é a porta de entrada comercial e não pode
+              competir de igual para igual com os botões de quem só vai palpitar. */}
+          <div className="mt-8 pt-7 border-t border-gray-100">
+            <div className="rounded-2xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 p-5">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Trophy size={18} className="text-ouro-600" />
+                <h3 className="font-display text-lg text-noite-900" style={{ letterSpacing: '0.04em' }}>QUER ORGANIZAR UM BOLÃO?</h3>
+              </div>
+              <p className="text-noite-500 text-sm leading-relaxed mb-4">
+                Monte o seu, convide a galera e administre rodadas, pagamentos e resultados pelo painel do organizador.
+              </p>
+              <button onClick={() => setView('onboard')} className="w-full py-3 rounded-xl font-semibold text-noite-900 bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2">
+                <Trophy size={18} /> Criar meu bolão
               </button>
             </div>
           </div>
