@@ -54,7 +54,7 @@ const RecebimentoAutomaticoCard = () => {
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-lg font-bold">Recebimento automático das cartelas</h3>
         <span className={`text-xs font-bold px-2 py-1 rounded-full ${ativo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-          {ativo ? 'ATIVO' : 'MANUAL'}
+          {ativo ? 'AUTOMÁTICO' : 'MANUAL'}
         </span>
       </div>
 
@@ -66,9 +66,14 @@ const RecebimentoAutomaticoCard = () => {
 
       {ativo ? (
         <>
-          <p className="text-sm text-gray-600 mb-2">
-            URL do webhook a cadastrar na Woovi (evento <em>Cobrança paga</em>):
-          </p>
+          <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
+            <p className="text-sm text-green-800 font-semibold mb-1">Modo automático ligado</p>
+            <p className="text-sm text-green-700">
+              Confirme que a URL abaixo está cadastrada como webhook na sua conta Woovi,
+              no evento <em>Cobrança paga</em>. Sem ela a cobrança é criada, mas a baixa
+              não acontece sozinha.
+            </p>
+          </div>
           <div className="flex flex-col sm:flex-row gap-2 mb-4">
             <input readOnly value={webhook} onFocus={(e) => e.target.select()}
               className="v2-input flex-1 font-mono text-xs" />
@@ -78,16 +83,39 @@ const RecebimentoAutomaticoCard = () => {
           </div>
           <button onClick={() => salvar('')} disabled={salvando}
             className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm disabled:opacity-60">
-            Desligar recebimento automático
+            Voltar para o modo manual
           </button>
         </>
       ) : (
         <>
-          <ol className="text-sm text-gray-600 list-decimal pl-5 space-y-1 mb-4">
-            <li>Crie uma conta gratuita em <strong>woovi.com</strong> com a sua chave PIX.</li>
-            <li>No painel da Woovi, gere uma <strong>API Key</strong> com permissão de criar e ler cobrança.</li>
-            <li>Cole abaixo e salve. Depois cadastre a URL do webhook que vai aparecer aqui.</li>
+          <div className="rounded-xl border border-gray-200 p-4 mb-4">
+            <p className="text-sm font-semibold text-noite-800 mb-1">Como está hoje: modo manual</p>
+            <p className="text-sm text-gray-600">
+              O participante paga no seu PIX e manda o comprovante. Você confere e marca
+              como pago no Financeiro. Funciona sem cadastro nenhum, mas dá trabalho e é
+              onde mais aparece erro de conferência.
+            </p>
+          </div>
+
+          <p className="text-sm font-semibold text-noite-800 mb-2">Para ativar o modo automático</p>
+          <p className="text-sm text-gray-600 mb-3">
+            É preciso ter uma conta na <strong>Woovi</strong>, que é quem identifica o
+            pagamento. A conta é gratuita e o dinheiro continua caindo na sua chave PIX —
+            a Woovi só avisa o sistema de que o pagamento entrou.
+          </p>
+          <ol className="text-sm text-gray-600 list-decimal pl-5 space-y-2 mb-4">
+            <li>Acesse <strong>woovi.com</strong> e crie sua conta com o seu CNPJ ou CPF.</li>
+            <li>Cadastre na Woovi a mesma <strong>chave PIX</strong> onde você quer receber as cartelas.</li>
+            <li>No painel da Woovi, abra <strong>API / Integrações</strong> e gere uma <strong>API Key</strong>.</li>
+            <li>
+              Marque apenas as permissões <strong>criar cobrança</strong> e <strong>ler cobrança</strong>.
+              Não marque saque, transferência, pagamento nem chave PIX — se essa chave vazar,
+              quem a tiver não consegue mover o seu dinheiro.
+            </li>
+            <li>Copie a chave gerada e cole no campo abaixo.</li>
+            <li>Depois de salvar, aparece aqui a URL do webhook. Volte à Woovi, abra <strong>Webhooks</strong> e cadastre essa URL no evento <em>Cobrança paga</em>.</li>
           </ol>
+
           <label className="v2-label">App ID da sua conta Woovi</label>
           <div className="relative mb-1">
             <input type={mostrar ? 'text' : 'password'} value={appId} onChange={(e) => setAppId(e.target.value)}
@@ -99,6 +127,7 @@ const RecebimentoAutomaticoCard = () => {
           </div>
           <p className="text-xs text-gray-400 mb-4">
             A chave fica guardada só no seu bolão e nunca aparece para os participantes.
+            Você pode voltar ao modo manual quando quiser.
           </p>
           <button onClick={() => salvar(appId.trim())} disabled={salvando || !appId.trim()}
             className="v2-btn-primary px-5 py-2.5 text-sm disabled:opacity-60">
@@ -113,150 +142,108 @@ const RecebimentoAutomaticoCard = () => {
   );
 };
 
-// Liga/desliga o débito automático da mensalidade. Fica nas Configurações
-// porque é escolha permanente do organizador, não uma ação de cobrança.
-const RecorrenciaCard = () => {
+// Mensalidade da plataforma: gera o PIX e mostra a situação. Fica também em
+// Configurações porque é para lá que o bolão bloqueado é mandado — o único
+// lugar que ele ainda abre.
+//
+// Não pede CPF nem cadastro de débito automático: o Pix Automático exige que o
+// banco do pagador suporte e que ele autorize no app, o que deixava metade dos
+// organizadores sem conseguir pagar. Cobrança recorrente por cartão fica para
+// quando houver volume que justifique a integração.
+const MensalidadeCard = () => {
   const { tenantId, currentUser } = useApp();
   const [sub, setSub] = useState(null);
-  const [temEmail, setTemEmail] = useState(true);
-  const [doc_, setDoc_] = useState('');
-  const [email, setEmail] = useState('');
+  const [pix, setPix] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
   const [erro, setErro] = useState('');
+  const [copiado, setCopiado] = useState(false);
 
-  const carregar = async () => {
-    try {
-      const snap = await getDoc(doc(db, 'tenants', tenantId));
-      if (!snap.exists()) return;
-      setSub(snap.data().subscription || null);
-      setTemEmail(!!snap.data().ownerEmail);
-    } catch { /* sem permissão: o card some */ }
-  };
-  useEffect(() => { carregar(); }, [tenantId]);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'tenants', tenantId));
+        if (vivo && snap.exists()) setSub(snap.data().subscription || null);
+      } catch { /* sem permissão: o card some */ }
+    })();
+    return () => { vivo = false; };
+  }, [tenantId]);
 
   if (!sub || currentUser?.globalAdmin) return null;
-  const ligada = !!sub.recurring;
 
-  const alternar = async (ativar) => {
-    setBusy(true); setErro(''); setMsg('');
+  const status = evaluateStatus(sub);
+  const faltam = daysUntil(accessEndsAt(sub));
+  const valor = ((Number(sub.priceCents) || 0) / 100).toFixed(2).replace('.', ',');
+  const ate = accessEndsAt(sub) ? new Date(accessEndsAt(sub)).toLocaleDateString('pt-BR') : null;
+
+  const rotulo = {
+    active:  ['bg-green-100 text-green-700', 'EM DIA'],
+    trial:   ['bg-ouro-100 text-ouro-700', 'EM TESTE'],
+    overdue: ['bg-orange-100 text-orange-700', 'VENCIDA'],
+    blocked: ['bg-red-100 text-red-700', 'BLOQUEADO'],
+  }[status] || ['bg-gray-100 text-gray-600', status];
+
+  const gerar = async () => {
+    setBusy(true); setErro('');
     try {
       const idToken = await getIdToken();
-      const res = await fetch('/api/billing/recurrence', {
+      const res = await fetch('/api/billing/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken, tenantId, enabled: ativar, taxID: doc_, email }),
+        body: JSON.stringify({ idToken, tenantId }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.detalhe || d.error || 'Não foi possível concluir');
-      setMsg(ativar
-        ? 'Recorrência ativada. Autorize o débito automático no aplicativo do seu banco quando a solicitação chegar.'
-        : 'Recorrência desligada. Você volta a pagar pelo botão a cada mês.');
-      await carregar();
+      if (!res.ok) throw new Error(d.error || 'Não foi possível gerar a cobrança');
+      setPix(d);
     } catch (e) { setErro(e.message); } finally { setBusy(false); }
+  };
+
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(pix.brCode); setCopiado(true); setTimeout(() => setCopiado(false), 2000); } catch {}
   };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border p-6">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-lg font-bold">Pagamento automático da mensalidade</h3>
-        <span className={`text-xs font-bold px-2 py-1 rounded-full ${ligada ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-          {ligada ? 'ATIVO' : 'DESLIGADO'}
-        </span>
+        <h3 className="text-lg font-bold">Mensalidade da plataforma</h3>
+        <span className={`text-xs font-bold px-2 py-1 rounded-full ${rotulo[0]}`}>{rotulo[1]}</span>
       </div>
 
       <p className="text-sm text-gray-600 mb-4">
-        Com o débito automático você autoriza uma vez e a mensalidade é cobrada sozinha
-        todo mês, sem risco de o bolão travar por esquecimento. Desligado, você continua
-        pagando pelo botão no topo do painel a cada mês.
+        {status === 'active' && ate && <>Seu bolão está ativo até <strong>{ate}</strong>.</>}
+        {status === 'trial' && <>Seu período de teste termina em <strong>{Math.max(0, faltam)} dia(s)</strong>.</>}
+        {status === 'overdue' && <>A mensalidade venceu. Regularize para o bolão não ser bloqueado.</>}
+        {status === 'blocked' && <>O bolão está bloqueado. Pague o PIX abaixo para liberar na hora.</>}
+        {' '}O valor é <strong>R$ {valor}/mês</strong>.
       </p>
 
-      {!ligada && (
-        <div className="mb-4 space-y-3">
-          <div>
-            <label className="v2-label">CPF ou CNPJ do titular da conta que vai pagar</label>
-            <input type="text" placeholder="Somente números" value={doc_}
-              onChange={(e) => setDoc_(e.target.value)} className="v2-input" />
-            <p className="text-xs text-gray-400 mt-1">
-              Não confunda com a chave PIX do bolão: aqui é o documento de quem paga a
-              mensalidade da plataforma, exigido pelo banco para autorizar o débito automático.
+      {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
+
+      {!pix ? (
+        <button onClick={gerar} disabled={busy} className="v2-btn-primary px-5 py-2.5 text-sm disabled:opacity-60">
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />}
+          {busy ? 'Gerando...' : 'Gerar PIX da mensalidade'}
+        </button>
+      ) : (
+        <div className="flex flex-col sm:flex-row gap-5 items-center border-t pt-4">
+          {pix.qrCodeImage && <img src={pix.qrCodeImage} alt="QR Code do PIX" className="w-44 h-44 bg-[#ffffff] rounded-xl p-2" />}
+          <div className="flex-1 w-full">
+            <p className="text-sm font-semibold text-noite-800 mb-2">
+              Pague o PIX. A liberação é automática assim que o banco confirmar.
             </p>
+            <textarea readOnly value={pix.brCode || ''} rows={3} onFocus={(e) => e.target.select()}
+              className="w-full text-xs font-mono p-2 rounded-lg border bg-[#ffffff] text-[#0a0f1a] resize-none" />
+            <button onClick={copiar} className="mt-2 v2-btn-outline px-4 py-2 text-sm">
+              <Copy size={14} /> {copiado ? 'Copiado!' : 'Copiar código PIX'}
+            </button>
           </div>
-          {/* Bolões criados antes da coleta de e-mail no cadastro caem aqui. */}
-          {!temEmail && (
-            <div>
-              <label className="v2-label">E-mail para os avisos de cobrança</label>
-              <input type="email" placeholder="voce@email.com" value={email}
-                onChange={(e) => setEmail(e.target.value)} className="v2-input" />
-              <p className="text-xs text-gray-400 mt-1">Seu bolão ainda não tem e-mail cadastrado.</p>
-            </div>
-          )}
         </div>
       )}
 
-      {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
-      {msg && <p className="text-sm text-green-700 mb-3">{msg}</p>}
-
-      <button onClick={() => alternar(!ligada)} disabled={busy}
-        className={`px-5 py-2.5 rounded-lg text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-60 ${
-          ligada ? 'border border-red-300 text-red-600' : 'v2-btn-primary'}`}>
-        {busy && <Loader2 size={16} className="animate-spin" />}
-        {ligada ? 'Desligar pagamento automático' : 'Ativar pagamento automático'}
-      </button>
-    </div>
-  );
-};
-
-// Assinatura do bolão com a plataforma: mostra quanto falta para o teste acabar
-// e abre a cobrança mensal. O bloqueio de verdade é das regras do Firestore —
-// isto aqui é o aviso e o caminho para pagar.
-// Convite do bolão: link pronto e mensagem pronta. É o último passo antes de o
-// bolão ganhar vida, então precisa estar a um clique — não escondido numa aba.
-const ConviteCard = () => {
-  const { tenantId, settings } = useApp();
-  const [copiado, setCopiado] = useState('');
-
-  const nome = settings?.brandName || 'Nosso bolão';
-  const url = inviteUrl(tenantId);
-  const mensagem = inviteMessage(nome, url);
-
-  const copiar = async (texto, qual) => {
-    try {
-      await navigator.clipboard.writeText(texto);
-      setCopiado(qual);
-      setTimeout(() => setCopiado(''), 2000);
-    } catch { /* sem clipboard: o texto está visível para copiar à mão */ }
-  };
-
-  return (
-    <div data-tour="convite" className="bg-white rounded-xl shadow-sm border p-6">
-      <h3 className="text-lg font-bold mb-2">Convide seus participantes</h3>
-      <p className="text-sm text-gray-600 mb-4">
-        Quem abrir este link cai direto no cadastro do <strong>seu</strong> bolão.
+      <p className="text-xs text-gray-400 mt-4">
+        Pagamento mensal por PIX, sem cadastro de cartão. Débito automático entra
+        em uma versão futura.
       </p>
-
-      <label className="v2-label">Link do seu bolão</label>
-      <div className="flex flex-col sm:flex-row gap-2 mb-4">
-        <input type="text" readOnly value={url} onFocus={(e) => e.target.select()}
-          className="v2-input flex-1 font-mono text-xs" />
-        <button onClick={() => copiar(url, 'link')} className="v2-btn-outline px-4 py-2.5 text-sm whitespace-nowrap">
-          <Copy size={15} /> {copiado === 'link' ? 'Copiado!' : 'Copiar link'}
-        </button>
-      </div>
-
-      <label className="v2-label">Mensagem pronta para o grupo</label>
-      <textarea readOnly value={mensagem} rows={7} onFocus={(e) => e.target.select()}
-        className="v2-input w-full text-sm mb-3 resize-none" />
-
-      <div className="flex flex-col sm:flex-row gap-2">
-        <a href={`https://wa.me/?text=${encodeURIComponent(mensagem)}`} target="_blank" rel="noopener noreferrer"
-          className="v2-btn-primary px-5 py-2.5 text-sm justify-center">
-          <Send size={16} /> Enviar pelo WhatsApp
-        </a>
-        <button onClick={() => copiar(mensagem, 'msg')} className="v2-btn-outline px-5 py-2.5 text-sm">
-          <Copy size={15} /> {copiado === 'msg' ? 'Copiada!' : 'Copiar mensagem'}
-        </button>
-      </div>
     </div>
   );
 };
@@ -4064,7 +4051,10 @@ const AdminPanel = ({ setView }) => {
         {/* Bloqueado: o organizador entra e navega, mas as ferramentas ficam
             fora do ar até pagar. Trancá-lo para fora da conta tiraria dele
             justamente a tela onde está o botão de pagamento. */}
-        {subStatus === STATUS.BLOCKED ? (
+        {/* Configurações continua acessível mesmo bloqueado: é lá que ele paga
+            a mensalidade e ajusta a conta de recebimento. Travar isso junto
+            deixaria o organizador sem caminho para se regularizar. */}
+        {subStatus === STATUS.BLOCKED && activeTab !== 'settings' ? (
           <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-2xl mx-auto mt-4">
             <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={28} className="text-red-600" />
@@ -4076,9 +4066,12 @@ const AdminPanel = ({ setView }) => {
               participantes não conseguem enviar palpites.
             </p>
             <p className="text-noite-500 text-sm leading-relaxed max-w-md mx-auto mt-3">
-              Use o botão <strong>Ativar meu bolão</strong> acima. A liberação é
-              automática assim que o pagamento for confirmado.
+              Use o botão <strong>Ativar meu bolão</strong> acima, ou vá em
+              Configurações. A liberação é automática assim que o PIX for confirmado.
             </p>
+            <button onClick={() => setActiveTab('settings')} className="v2-btn-outline px-5 py-2.5 text-sm mt-5">
+              <Edit2 size={16} /> Abrir Configurações
+            </button>
           </div>
         ) : (
         <>
@@ -4497,7 +4490,7 @@ const AdminPanel = ({ setView }) => {
                     </div>
                   </div>
                 )}
-                {!currentUser?.globalAdmin && <RecorrenciaCard />}
+                {!currentUser?.globalAdmin && <MensalidadeCard />}
                 {!currentUser?.globalAdmin && <WhatsAppConnectCard />}
                 {currentUser?.globalAdmin && (
                 <div className="bg-white rounded-xl shadow-sm border p-6">
