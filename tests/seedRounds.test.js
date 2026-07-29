@@ -83,6 +83,18 @@ describe('semear rodadas de um bolao novo', () => {
     expect(db.criadas[0].number).toBe(22);
   });
 
+  it('NAO chama de "em andamento" rodada que ja acabou faz tempo', async () => {
+    // Avisar que a rodada 3 de meses atras "esta em andamento" seria mentira, e
+    // encheria o aviso com dezenas de numeros que nao interessam a ninguem.
+    const db = fakeDb({ rodadasDaFonte: [
+      oficial({ number: 3, matches: [{ id: 1, date: daquiA(-60 * DIA) }, { id: 2, date: daquiA(-59 * DIA) }] }),
+      oficial({ number: 22, matches: [{ id: 1, date: daquiA(9 * DIA) }] }),
+    ] });
+    const r = await seedRoundsForTenant(db, 'novo');
+    expect(r.criadas).toBe(1);
+    expect(r.emAndamento).toEqual([]);
+  });
+
   it('recalcula o status pela data do jogo, nao pelo que estava gravado', async () => {
     const db = fakeDb({ rodadasDaFonte: [
       oficial({ number: 22, status: 'upcoming', matches: [{ id: 1, date: daquiA(2 * DIA) }] }),

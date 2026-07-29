@@ -9,12 +9,28 @@ import { DEFAULT_TENANT_ID } from './tenant.js';
 
 const DIAS_PARA_ABRIR = 5;
 
+// Margem depois do último jogo para considerar a rodada realmente encerrada.
+const FIM_APOS_ULTIMO_JOGO_MS = 3 * 36e5;
+
+function datasDosJogos(r) {
+  return (r.matches || []).map(m => m.date).filter(Boolean)
+    .map(d => new Date(d).getTime()).filter(t => Number.isFinite(t));
+}
+
 // Data do primeiro jogo da rodada. É ela, e não o status guardado, que decide
 // se a rodada ainda pode receber palpite.
 function primeiroJogoEm(r) {
-  const datas = (r.matches || []).map(m => m.date).filter(Boolean).map(d => new Date(d).getTime())
-    .filter(t => Number.isFinite(t));
+  const datas = datasDosJogos(r);
   return datas.length ? Math.min(...datas) : null;
+}
+
+// Rodada acontecendo AGORA: já começou e o último jogo ainda não terminou.
+// Separada das rodadas passadas porque só ela merece aviso — dizer que a
+// rodada 3 de meses atrás "está em andamento" seria ruído e mentira.
+function estaAcontecendo(r, agora) {
+  const datas = datasDosJogos(r);
+  if (!datas.length) return false;
+  return Math.min(...datas) <= agora && agora < Math.max(...datas) + FIM_APOS_ULTIMO_JOGO_MS;
 }
 
 // Status recalculado no momento da cópia. Confiar no status do bolão de origem
@@ -66,7 +82,12 @@ export async function seedRoundsForTenant(db, tenantId) {
   const copiaveis = [];
   for (const r of oficiais) {
     const st = statusNaCopia(r, agora);
-    if (st === 'em_andamento') { emAndamento.push(r.number); continue; }
+    if (st === 'em_andamento') {
+      // Só a que está rolando agora vira aviso; as passadas ficam de fora em
+      // silêncio, porque são história e não decisão do organizador.
+      if (estaAcontecendo(r, agora)) emAndamento.push(r.number);
+      continue;
+    }
     if (st) copiaveis.push({ ...r, statusCalculado: st });
   }
   copiaveis.sort((a, b) => (a.number || 0) - (b.number || 0));
