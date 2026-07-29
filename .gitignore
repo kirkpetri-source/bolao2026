@@ -15,3 +15,4 @@ users-import.json
 
 # Backups locais do Firestore (contêm dados — não commitar)
 backups/
+.env*

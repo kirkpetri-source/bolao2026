@@ -6,6 +6,7 @@ import { getAdminDb, FieldValue } from '../_shared/firebaseAdmin.js';
 import { getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { STATUS, renewedPeriodEnd, trialSubscription } from '../_shared/subscription.js';
+import { sendEmail, layoutEmail } from '../_shared/email.js';
 
 // Confere na API em vez de confiar no corpo do webhook: qualquer um consegue
 // fazer um POST aqui, mas ninguém forja um pagamento aprovado na Woovi.
@@ -77,15 +78,34 @@ export default async function handler(req, res) {
       updatedAt: FieldValue.serverTimestamp(),
     });
 
+    const ate = new Date(novoFim).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const nome = tenant.name || 'seu bolão';
+
     const destino = formatPhone(tenant.ownerWhatsapp || '');
     if (destino) {
-      const ate = new Date(novoFim).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-      const texto = `✅ *Assinatura confirmada!*\n\nO ${tenant.name || 'seu bolão'} está ativo até ${ate}.\n\nObrigado!`;
+      const texto = `✅ *Assinatura confirmada!*\n\nO ${nome} está ativo até ${ate}.\n\nObrigado!`;
       try {
         await sendWhatsApp(destino, texto, await getSettings(DEFAULT_TENANT_ID));
       } catch (e) {
         console.error('billing/webhook: WhatsApp falhou:', e.message);
       }
+    }
+
+    if (tenant.ownerEmail) {
+      const r = await sendEmail({
+        to: tenant.ownerEmail,
+        subject: `${nome}: assinatura confirmada`,
+        html: layoutEmail({
+          titulo: 'Pagamento confirmado',
+          paragrafos: [
+            `O <strong>${nome}</strong> está ativo até <strong>${ate}</strong>.`,
+            'As ferramentas do painel foram liberadas e os participantes já podem enviar palpites.',
+          ],
+        }),
+        // Uma confirmação por cobrança, mesmo que a Woovi reentregue o evento.
+        idempotencyKey: `assinatura-confirmada/${correlationID}`,
+      });
+      if (!r.ok) console.error('billing/webhook: e-mail falhou:', r.motivo);
     }
 
     console.log(`billing/webhook: ${tenantId} ativo até ${new Date(novoFim).toISOString()}`);
