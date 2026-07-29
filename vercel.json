@@ -29,7 +29,6 @@
   ],
   "headers": [
     {
-      "comment": "O index.html aponta para os bundles com hash no nome. Se ele for guardado em cache, o navegador continua carregando a versão antiga do sistema mesmo depois de um deploy — foi o que obrigou a testar em aba anônima. Os assets com hash podem ser guardados para sempre, porque o nome muda a cada build.",
       "source": "/",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, must-revalidate" }
