@@ -36,7 +36,9 @@ function mensagem(tenantName, status, sub, now) {
 function emailDoAviso(tenantName, status, sub, now) {
   const valor = realMoney(sub.priceCents);
   const fim = accessEndsAt(sub);
-  const painel = 'https://bolao-brasileirao-2025-dev.vercel.app';
+  // O endereço do site vem do ambiente: fixá-lo no código faria os e-mails de
+  // cobrança apontarem para o domínio antigo depois da troca de domínio.
+  const painel = (process.env.APP_URL || 'https://brasilbolao.com.br').replace(/\/+$/, '');
   const botao = { url: painel, texto: 'Abrir o painel e pagar' };
 
   if (status === STATUS.BLOCKED) {

@@ -56,11 +56,22 @@
       "has": [
         {
           "type": "host",
-          "value": "bolao-brasileirao-2025-dev-lion-techs-projects-a92f3d16.vercel.app"
+          "value": "www.brasilbolao.com.br"
         }
       ],
-      "destination": "https://bolao-brasileirao-2025-dev.vercel.app/$1",
+      "destination": "https://brasilbolao.com.br/$1",
       "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "bolao-brasileirao-2025-dev.vercel.app"
+        }
+      ],
+      "destination": "https://brasilbolao.com.br/$1",
+      "permanent": false
     }
   ],
   "headers": [
