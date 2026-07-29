@@ -51,6 +51,14 @@ service cloud.firestore {
       return isMember(tid) && get(memberPath(tid)).data.role == 'owner';
     }
 
+    // O dono da plataforma precisa ENXERGAR qualquer bolão para dar suporte —
+    // sem isto ele abre um bolão de cliente e vê tudo vazio, porque as regras
+    // pedem pertencimento e ele só é membro do próprio. Leitura apenas: alterar
+    // dado de cliente continua exigindo ser owner daquele bolão.
+    function podeVerTenant(tid) {
+      return isMember(tid) || isAdmin();
+    }
+
     // Assinatura do bolão com a plataforma. Quem não paga fica bloqueado, e
     // aqui é o único lugar que o cliente não contorna: o painel apenas espelha
     // esta decisão. O status é escrito pelo cron de billing (Admin SDK).
@@ -67,13 +75,13 @@ service cloud.firestore {
 
     // ── Tenants e membros ───────────────────────────────────────────────────
     match /tenants/{tid} {
-      allow get: if isMember(tid);
+      allow get: if podeVerTenant(tid);
       allow list: if false;                   // sem varredura global de tenants
       allow create, update, delete: if false; // gestão via Admin SDK (onboarding/billing)
 
       match /members/{uid} {
         allow get: if isSignedIn() && (request.auth.uid == uid || isOwner(tid));
-        allow list: if isMember(tid);
+        allow list: if podeVerTenant(tid);
         // Owner gere membros; cadastro público faz self-join como participant.
         allow create: if isOwner(tid)
           || (isSelf(uid) && request.resource.data.role == 'participant');
@@ -103,7 +111,7 @@ service cloud.firestore {
     // mas não abre nem edita rodada até pagar. É isso que trava a operação dele
     // sem trancá-lo para fora da própria conta.
     match /rounds/{doc} {
-      allow read: if isMember(resource.data.tenantId);
+      allow read: if podeVerTenant(resource.data.tenantId);
       allow create: if isOwner(request.resource.data.tenantId)
         && !tenantBlocked(request.resource.data.tenantId);
       allow update: if isOwner(resource.data.tenantId)
@@ -113,7 +121,7 @@ service cloud.firestore {
 
     // ── Palpites (escopados por tenant) ─────────────────────────────────────
     match /predictions/{predId} {
-      allow read: if isMember(resource.data.tenantId);
+      allow read: if podeVerTenant(resource.data.tenantId);
 
       // Membro cria palpite em seu próprio nome e NUNCA marca como pago.
       // Owner pode criar em nome de qualquer participante.
@@ -147,13 +155,13 @@ service cloud.firestore {
 
     // ── Comunicados: só o owner do tenant ───────────────────────────────────
     match /communications/{doc} {
-      allow read: if isOwner(resource.data.tenantId);
+      allow read: if isOwner(resource.data.tenantId) || isAdmin();
       allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
     }
 
     // ── Configurações (contêm segredos Woovi/Evolution): só o owner ─────────
     match /settings/{doc} {
-      allow read: if isOwner(resource.data.tenantId);
+      allow read: if isOwner(resource.data.tenantId) || isAdmin();
       allow write: if isOwner(request.resource.data.tenantId) || isOwner(resource.data.tenantId);
     }
 
