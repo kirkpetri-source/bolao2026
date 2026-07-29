@@ -37,6 +37,14 @@ async function getState(ev, name) {
   return r.data?.instance?.state || r.data?.state || 'close';
 }
 
+// JIDs brasileiros costumam vir sem o nono dígito (556499555364). O número
+// gravado vira o destino das notificações do organizador em bolao-engine, então
+// precisa sair daqui no formato de celular completo.
+function normalizeBrMobile(digits) {
+  const m = /^55(\d{2})([6-9]\d{7})$/.exec(digits);
+  return m ? `55${m[1]}9${m[2]}` : digits;
+}
+
 // Número conectado (ownerJid) — formatos variam entre versões do Evolution.
 async function getOwnerNumber(ev, name) {
   const r = await ev.get(`/instance/fetchInstances?instanceName=${encodeURIComponent(name)}`);
@@ -44,7 +52,7 @@ async function getOwnerNumber(ev, name) {
   const list = Array.isArray(r.data) ? r.data : (r.data?.instances || []);
   const inst = list.find(i => (i.name || i.instanceName || i.instance?.instanceName) === name) || list[0];
   const jid = inst?.ownerJid || inst?.owner || inst?.instance?.owner || '';
-  return String(jid).split('@')[0].replace(/\D/g, '');
+  return normalizeBrMobile(String(jid).split('@')[0].replace(/\D/g, ''));
 }
 
 export default async function handler(req, res) {
