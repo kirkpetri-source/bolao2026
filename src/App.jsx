@@ -741,7 +741,17 @@ const LoginScreen = ({ setView }) => {
             </div>
             <div className="mb-7">
               <h2 className="font-display text-4xl text-noite-900" style={{ letterSpacing: '0.04em' }}>CRIAR CONTA</h2>
-              <p className="text-noite-400 text-sm mt-1.5">Preencha os dados para participar do bolão</p>
+              {/* O nome do bolão precisa estar na cara de quem se cadastra: com
+                  vários bolões na plataforma, um link errado faz a pessoa
+                  entrar no bolão de outra sem perceber. */}
+              <div className="mt-3 rounded-xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase text-noite-500" style={{ letterSpacing: '0.14em' }}>
+                  Você está se cadastrando no bolão
+                </p>
+                <p className="font-display text-lg text-noite-900 break-words" style={{ letterSpacing: '0.02em' }}>
+                  {settings?.brandName?.trim() || 'Bolão Brasileirão'}
+                </p>
+              </div>
             </div>
             {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm animate-bounce-in">{error}</div>}
             <div className="space-y-4">

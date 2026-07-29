@@ -10,6 +10,20 @@ import { changeMyPassword, authErrorMessage } from './authService.js';
 const UserPanel = ({ setView }) => {
   const { currentUser, setCurrentUser, logout, teams, rounds, predictions, users, establishments, addPrediction, settings, deleteCartelaPredictions, updateUser, tenantId } = useApp();
   const [activeTab, setActiveTab] = useState('predictions');
+
+  const nomeDoBolao = (settings?.brandName || '').trim() || 'Bolão';
+
+  // Confirmação de entrada. Com vários bolões na mesma plataforma, um link
+  // errado levava a pessoa a se cadastrar e palpitar no bolão de outra sem
+  // perceber. Aparece uma vez por sessão, e só para participante.
+  const chaveConfirmacao = `bolao-confirmado:${currentUser?.id}:${tenantId}`;
+  const [confirmado, setConfirmado] = useState(() => {
+    try { return sessionStorage.getItem(chaveConfirmacao) === '1'; } catch { return true; }
+  });
+  const confirmarEntrada = () => {
+    try { sessionStorage.setItem(chaveConfirmacao, '1'); } catch { /* sem sessionStorage: só não lembra */ }
+    setConfirmado(true);
+  };
   const [selectedRound, setSelectedRound] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingPredictions, setPendingPredictions] = useState(null);
@@ -1451,6 +1465,36 @@ const UserPanel = ({ setView }) => {
     return selectedFinishedRound ? getRoundPrize(selectedFinishedRound) : null;
   }, [selectedFinishedRound, settings]);
 
+  if (!confirmado) {
+    return (
+      <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
+        <div className="bg-white rounded-2xl border shadow-modal max-w-md w-full p-7 text-center animate-slide-up">
+          <div className="w-14 h-14 rounded-2xl bg-campo-600 flex items-center justify-center mx-auto mb-5">
+            <Trophy size={26} className="text-ouro-500" />
+          </div>
+          <p className="text-noite-400 text-xs font-semibold uppercase mb-2" style={{ letterSpacing: '0.18em' }}>
+            Você está entrando no bolão
+          </p>
+          <h1 className="font-display text-3xl text-noite-900 mb-4 break-words" style={{ letterSpacing: '0.02em' }}>
+            {nomeDoBolao}
+          </h1>
+          <p className="text-sm text-noite-500 leading-relaxed mb-6">
+            Confira se é o bolão em que você se cadastrou. Seus palpites e pagamentos
+            valem só aqui dentro.
+          </p>
+          <button onClick={confirmarEntrada} className="v2-btn-primary w-full py-3 text-base mb-3">
+            Sim, é este — entrar
+          </button>
+          <button
+            onClick={() => { logout(); setView('login'); }}
+            className="text-sm text-noite-400 hover:text-noite-700">
+            Não é este bolão, sair
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen page-bg font-body">
 
@@ -1463,7 +1507,16 @@ const UserPanel = ({ setView }) => {
               <div className="w-8 h-8 bg-white/15 dark:bg-campo-600 rounded-lg flex items-center justify-center flex-shrink-0">
                 <Trophy size={15} className="text-white dark:text-ouro-500" />
               </div>
-              <span className="font-display text-white text-sm" style={{ letterSpacing: '0.18em' }}>BOLÃO BRASILEIRÃO 2026</span>
+              {/* Nome do bolão, não um título fixo: o participante precisa
+                  saber o tempo todo em qual bolão ele está. */}
+              <div className="min-w-0">
+                <span className="block font-display text-white text-sm truncate" style={{ letterSpacing: '0.14em' }}>
+                  {nomeDoBolao}
+                </span>
+                <span className="block text-white/50 text-[10px] font-medium" style={{ letterSpacing: '0.12em' }}>
+                  BOLÃO BRASILEIRÃO 2026
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               {openRounds.length > 0 && (
