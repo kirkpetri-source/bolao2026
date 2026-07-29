@@ -7,6 +7,7 @@ import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTempl
 import { db, pickPublicConfig } from './firebase.js';
 import { SERIE_A_2026_TEAMS } from './constants.js';
 import { resolveTenantId, rememberTenant, publicConfigDocId } from './tenant.js';
+import NovaVersao from './components/NovaVersao.jsx';
 import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
@@ -1048,6 +1049,7 @@ export default function Root() {
   return (
     <AppProvider>
       <App />
+      <NovaVersao />
     </AppProvider>
   );
 }

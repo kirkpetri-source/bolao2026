@@ -14,6 +14,105 @@ import { getIdToken, authErrorMessage } from './authService.js';
 import { inviteUrl, inviteMessage } from './tenant.js';
 import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
 
+// Baixa automática das cartelas. Sem isso o organizador confere comprovante a
+// comprovante no WhatsApp e marca cada um na mão — o que não escala e é onde
+// mais aparece erro de conferência.
+const RecebimentoAutomaticoCard = () => {
+  const { settings, updateSettings, currentUser } = useApp();
+  const [appId, setAppId] = useState('');
+  const [mostrar, setMostrar] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [erro, setErro] = useState('');
+
+  const ativo = !!settings?.woovi?.appId?.trim();
+  const webhook = `${window.location.origin}/api/payments/woovi-webhook`;
+
+  if (currentUser?.globalAdmin) return null; // já tem a aba Integrações
+
+  const salvar = async (valor) => {
+    setSalvando(true); setErro(''); setMsg('');
+    try {
+      await updateSettings({ 'woovi.appId': valor });
+      setMsg(valor
+        ? 'Recebimento automático ativado. Cadastre a URL do webhook na Woovi para a baixa acontecer sozinha.'
+        : 'Recebimento automático desligado. Você volta a conferir os comprovantes na mão.');
+      setAppId('');
+    } catch (e) {
+      setErro(e.message || 'Não foi possível salvar agora.');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const copiarWebhook = async () => {
+    try { await navigator.clipboard.writeText(webhook); setMsg('URL do webhook copiada.'); } catch {}
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border p-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-bold">Recebimento automático das cartelas</h3>
+        <span className={`text-xs font-bold px-2 py-1 rounded-full ${ativo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+          {ativo ? 'ATIVO' : 'MANUAL'}
+        </span>
+      </div>
+
+      <p className="text-sm text-gray-600 mb-4">
+        Hoje o participante paga no seu PIX e você confere o comprovante para dar baixa.
+        Conectando uma conta Woovi, o sistema gera o QR Code do PIX, identifica o pagamento
+        e <strong>dá baixa sozinho</strong> — é o mesmo funcionamento do bolão principal.
+      </p>
+
+      {ativo ? (
+        <>
+          <p className="text-sm text-gray-600 mb-2">
+            URL do webhook a cadastrar na Woovi (evento <em>Cobrança paga</em>):
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
+            <input readOnly value={webhook} onFocus={(e) => e.target.select()}
+              className="v2-input flex-1 font-mono text-xs" />
+            <button onClick={copiarWebhook} className="v2-btn-outline px-4 py-2.5 text-sm whitespace-nowrap">
+              <Copy size={15} /> Copiar
+            </button>
+          </div>
+          <button onClick={() => salvar('')} disabled={salvando}
+            className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm disabled:opacity-60">
+            Desligar recebimento automático
+          </button>
+        </>
+      ) : (
+        <>
+          <ol className="text-sm text-gray-600 list-decimal pl-5 space-y-1 mb-4">
+            <li>Crie uma conta gratuita em <strong>woovi.com</strong> com a sua chave PIX.</li>
+            <li>No painel da Woovi, gere uma <strong>API Key</strong> com permissão de criar e ler cobrança.</li>
+            <li>Cole abaixo e salve. Depois cadastre a URL do webhook que vai aparecer aqui.</li>
+          </ol>
+          <label className="v2-label">App ID da sua conta Woovi</label>
+          <div className="relative mb-1">
+            <input type={mostrar ? 'text' : 'password'} value={appId} onChange={(e) => setAppId(e.target.value)}
+              placeholder="Q2xpZW50X0lk..." className="v2-input pr-10 font-mono text-sm" />
+            <button onClick={() => setMostrar(!mostrar)} type="button"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-noite-400">
+              {mostrar ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">
+            A chave fica guardada só no seu bolão e nunca aparece para os participantes.
+          </p>
+          <button onClick={() => salvar(appId.trim())} disabled={salvando || !appId.trim()}
+            className="v2-btn-primary px-5 py-2.5 text-sm disabled:opacity-60">
+            {salvando && <Loader2 size={15} className="animate-spin" />} Ativar recebimento automático
+          </button>
+        </>
+      )}
+
+      {erro && <p className="text-sm text-red-600 mt-3">{erro}</p>}
+      {msg && <p className="text-sm text-green-700 mt-3">{msg}</p>}
+    </div>
+  );
+};
+
 // Liga/desliga o débito automático da mensalidade. Fica nas Configurações
 // porque é escolha permanente do organizador, não uma ação de cobrança.
 const RecorrenciaCard = () => {
@@ -75,10 +174,13 @@ const RecorrenciaCard = () => {
       {!ligada && (
         <div className="mb-4 space-y-3">
           <div>
-            <label className="v2-label">CPF ou CNPJ do responsável</label>
+            <label className="v2-label">CPF ou CNPJ do titular da conta que vai pagar</label>
             <input type="text" placeholder="Somente números" value={doc_}
               onChange={(e) => setDoc_(e.target.value)} className="v2-input" />
-            <p className="text-xs text-gray-400 mt-1">Exigido pelo banco para autorizar o débito automático.</p>
+            <p className="text-xs text-gray-400 mt-1">
+              Não confunda com a chave PIX do bolão: aqui é o documento de quem paga a
+              mensalidade da plataforma, exigido pelo banco para autorizar o débito automático.
+            </p>
           </div>
           {/* Bolões criados antes da coleta de e-mail no cadastro caem aqui. */}
           {!temEmail && (
@@ -165,6 +267,9 @@ const ConviteCard = () => {
 const SetupWizard = ({ aoFechar }) => {
   const { settings, updateSettings, tenantId, rounds } = useApp();
   const [passo, setPasso] = useState(0);
+  // Marcado por padrão: quem chega ao fim normalmente não quer rever. Quem
+  // desmarcar vê de novo no próximo acesso.
+  const [naoMostrarMais, setNaoMostrarMais] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
   const [resultadoRodadas, setResultadoRodadas] = useState('');
   const [pixKey, setPixKey] = useState(settings?.payment?.pixKey || settings?.pixKey || '');
@@ -219,7 +324,7 @@ const SetupWizard = ({ aoFechar }) => {
         <p className="text-[11px] font-bold uppercase text-campo-600" style={{ letterSpacing: '0.14em' }}>
           Passo {passo + 1} de {total}
         </p>
-        <button onClick={aoFechar} aria-label="Fechar" className="text-noite-400 hover:text-noite-700"><X size={18} /></button>
+        <button onClick={() => aoFechar(naoMostrarMais)} aria-label="Fechar" className="text-noite-400 hover:text-noite-700"><X size={18} /></button>
       </div>
       <h2 className="font-display text-2xl text-noite-900 mb-1" style={{ letterSpacing: '0.03em' }}>{titulo}</h2>
       {subtitulo && <p className="text-sm text-noite-500 mb-5">{subtitulo}</p>}
@@ -237,6 +342,13 @@ const SetupWizard = ({ aoFechar }) => {
           ))}
         </div>
 
+        <label className="flex items-center gap-2 text-xs text-noite-500 mb-4 cursor-pointer select-none">
+          <input type="checkbox" checked={naoMostrarMais}
+            onChange={(e) => setNaoMostrarMais(e.target.checked)}
+            className="w-4 h-4 accent-[#008542]" />
+          Não mostrar este passo a passo novamente
+        </label>
+
         {passo === 0 && (
           <>
             <Cabecalho titulo="Vamos deixar seu bolão pronto"
@@ -248,7 +360,7 @@ const SetupWizard = ({ aoFechar }) => {
               <li><strong>4.</strong> O convite pronto para mandar no grupo.</li>
             </ul>
             <div className="flex justify-between items-center">
-              <button onClick={aoFechar} className="text-xs text-noite-400 hover:text-noite-700">Fazer isso depois</button>
+              <button onClick={() => aoFechar(naoMostrarMais)} className="text-xs text-noite-400 hover:text-noite-700">Fazer isso depois</button>
               <button onClick={() => setPasso(1)} className="v2-btn-primary px-5 py-2.5 text-sm">
                 Começar <ChevronRight size={15} />
               </button>
@@ -262,9 +374,13 @@ const SetupWizard = ({ aoFechar }) => {
               subtitulo="Sem a chave PIX, os participantes não conseguem pagar a cartela." />
             <div className="space-y-4">
               <div>
-                <label className="v2-label">Chave PIX</label>
+                <label className="v2-label">Chave PIX que vai receber as cartelas</label>
                 <input type="text" value={pixKey} onChange={(e) => setPixKey(e.target.value)}
                   placeholder="CPF, celular, e-mail ou chave aleatória" className="v2-input" />
+                <p className="text-xs text-noite-400 mt-1">
+                  É a chave da sua conta: o dinheiro das cartelas cai direto nela. Pode ser o
+                  seu CPF, se for essa a chave que você usa.
+                </p>
               </div>
               <div>
                 <label className="v2-label">Nome de quem recebe</label>
@@ -348,7 +464,7 @@ const SetupWizard = ({ aoFechar }) => {
               <button onClick={() => setPasso(3)} className="px-3 py-2 rounded-lg border text-sm inline-flex items-center gap-1 text-noite-600">
                 <ChevronLeft size={15} /> Voltar
               </button>
-              <button onClick={aoFechar} className="v2-btn-primary px-5 py-2.5 text-sm">
+              <button onClick={() => aoFechar(naoMostrarMais)} className="v2-btn-primary px-5 py-2.5 text-sm">
                 <Check size={15} /> Concluir
               </button>
             </div>
@@ -644,16 +760,20 @@ const SubscriptionBanner = ({ onStatus }) => {
 // automáticos (confirmações, cobranças, resultados) passam a usar essa instância.
 const WhatsAppConnectCard = () => {
   const { tenantId } = useApp();
-  const [conn, setConn] = useState({ loading: true, state: null, number: '', qr: null, error: '' });
+  const [conn, setConn] = useState({ loading: true, state: null, number: '', qr: null, pairingCode: null, error: '' });
+  // No celular ninguém escaneia o próprio QR: o WhatsApp aceita um código de
+  // 8 caracteres digitado em "Conectar com número de telefone".
+  const [modoCodigo, setModoCodigo] = useState(false);
+  const [telefone, setTelefone] = useState('');
   const pollRef = useRef(null);
   const qrRef = useRef(null);
 
-  const callApi = async (action) => {
+  const callApi = async (action, extra = {}) => {
     const idToken = await getIdToken();
     const res = await fetch('/api/evolution/instance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken, tenantId, action }),
+      body: JSON.stringify({ idToken, tenantId, action, ...extra }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Falha na comunicação com o servidor');
@@ -681,9 +801,13 @@ const WhatsAppConnectCard = () => {
   // recusa o vínculo.
   const refreshQr = async () => {
     try {
+      // Renovar só faz sentido no QR, que rotaciona. O código de pareamento
+      // vale até expirar e pedir outro invalidaria o que o organizador está
+      // digitando no celular.
+      if (modoCodigo) return;
       const d = await callApi('connect');
       if (d.state === 'open') {
-        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, error: '' });
+        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, pairingCode: null, error: '' });
         stopPoll();
         return;
       }
@@ -702,14 +826,23 @@ const WhatsAppConnectCard = () => {
   useEffect(() => { refresh(); return stopPoll; }, [tenantId]);
 
   const handleConnect = async () => {
+    if (modoCodigo && String(telefone).replace(/\D/g, '').length < 12) {
+      setConn(c => ({ ...c, error: 'Informe o número com DDI e DDD, por exemplo 5564999998888.' }));
+      return;
+    }
     setConn(c => ({ ...c, loading: true, error: '' }));
     try {
-      const d = await callApi('connect');
+      const d = await callApi('connect', modoCodigo ? { phone: telefone } : {});
       if (d.state === 'open') {
-        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, error: '' });
+        setConn({ loading: false, state: 'open', number: d.number || '', qr: null, pairingCode: null, error: '' });
         return;
       }
-      setConn({ loading: false, state: 'connecting', number: '', qr: d.qr, error: d.qr ? '' : (d.note || 'QR indisponível — tente novamente') });
+      const obtido = d.pairingCode || d.qr;
+      setConn({
+        loading: false, state: 'connecting', number: '',
+        qr: d.qr || null, pairingCode: d.pairingCode || null,
+        error: obtido ? '' : (d.note || 'Não foi possível conectar agora — tente novamente'),
+      });
       startPolling();
     } catch (e) {
       setConn(c => ({ ...c, loading: false, error: e.message }));
@@ -769,15 +902,63 @@ const WhatsAppConnectCard = () => {
                 <button onClick={handleConnect} className="px-4 py-2 border rounded-lg text-sm inline-flex items-center gap-2"><RefreshCcw size={14} /> Gerar novo QR</button>
               </div>
             </div>
+          ) : conn.pairingCode ? (
+            <div>
+              <p className="font-semibold text-gray-800 mb-2">Digite este código no WhatsApp:</p>
+              <p className="font-mono tracking-[0.3em] text-3xl text-noite-900 bg-gray-50 rounded-xl py-4 text-center mb-3">
+                {conn.pairingCode}
+              </p>
+              <ol className="list-decimal pl-5 space-y-1 text-sm text-gray-600">
+                <li>Abra o <strong>WhatsApp</strong> no celular do bolão</li>
+                <li>Toque em <strong>Aparelhos conectados</strong></li>
+                <li>Toque em <strong>Conectar um aparelho</strong></li>
+                <li>Toque em <strong>Conectar com número de telefone</strong></li>
+                <li>Digite o código acima</li>
+              </ol>
+              <p className="text-xs text-gray-400 mt-3">
+                O código vale por alguns minutos. Esta tela avisa assim que conectar.
+              </p>
+            </div>
           ) : (
             <div>
               <p className="text-sm text-gray-600 mb-4">
-                Conecte o número de WhatsApp do seu bolão escaneando um QR Code. Com o número conectado,
-                o sistema envia automaticamente as confirmações de cartela, cobranças e resultados
-                das rodadas para os seus participantes.
+                Conecte o número de WhatsApp do seu bolão. Com ele conectado, o sistema envia
+                automaticamente as confirmações de cartela, cobranças e resultados das rodadas
+                para os seus participantes.
               </p>
+
+              {/* Escolha do método. No celular o QR é inútil: não dá para o
+                  próprio aparelho escanear a tela dele mesmo. */}
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => setModoCodigo(false)}
+                  className={`px-3 py-2 rounded-lg text-sm border ${!modoCodigo ? 'border-green-600 text-green-700 font-semibold' : 'text-gray-500'}`}>
+                  Ler QR Code
+                </button>
+                <button onClick={() => setModoCodigo(true)}
+                  className={`px-3 py-2 rounded-lg text-sm border ${modoCodigo ? 'border-green-600 text-green-700 font-semibold' : 'text-gray-500'}`}>
+                  Estou no celular
+                </button>
+              </div>
+
+              {modoCodigo ? (
+                <div className="mb-4">
+                  <label className="v2-label">Número do WhatsApp do bolão</label>
+                  <input type="tel" inputMode="numeric" placeholder="5564999998888"
+                    value={telefone} onChange={(e) => setTelefone(e.target.value.replace(/\D/g, ''))}
+                    className="v2-input" />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Com DDI e DDD, só números. Você vai receber um código para digitar no WhatsApp.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 mb-4">
+                  Você precisa de outro aparelho para escanear. Se estiver no celular do bolão,
+                  use a opção <strong>Estou no celular</strong>.
+                </p>
+              )}
+
               <button onClick={handleConnect} className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold inline-flex items-center gap-2">
-                <Send size={16} /> Conectar WhatsApp (QR Code)
+                <Send size={16} /> {modoCodigo ? 'Gerar código de conexão' : 'Conectar WhatsApp (QR Code)'}
               </button>
             </div>
           )}
@@ -1256,7 +1437,12 @@ const AdminPanel = ({ setView }) => {
     try { localStorage.setItem(chaveTour, new Date().toISOString()); } catch { /* idem */ }
   };
   const encerrarTour = () => { setMostrarTour(false); marcarVisto(); };
-  const encerrarWizard = () => { setMostrarWizard(false); marcarVisto(); };
+  // Só marca como visto se o organizador pediu. Desmarcando o checkbox ele
+  // reencontra o assistente no próximo acesso.
+  const encerrarWizard = (naoMostrarMais = true) => {
+    setMostrarWizard(false);
+    if (naoMostrarMais) marcarVisto();
+  };
   const [editingRound, setEditingRound] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingEstablishment, setEditingEstablishment] = useState(null);
@@ -4292,6 +4478,7 @@ const AdminPanel = ({ setView }) => {
             {settingsTab === 'whatsapp' && (
               <div className="space-y-6 max-w-3xl">
                 {!currentUser?.globalAdmin && <ConviteCard />}
+                {!currentUser?.globalAdmin && <RecebimentoAutomaticoCard />}
                 {!currentUser?.globalAdmin && (
                   <div className="bg-white rounded-xl shadow-sm border p-6">
                     <h3 className="text-lg font-bold mb-2">Ajuda</h3>

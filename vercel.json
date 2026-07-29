@@ -29,6 +29,31 @@
   ],
   "headers": [
     {
+      "comment": "O index.html aponta para os bundles com hash no nome. Se ele for guardado em cache, o navegador continua carregando a versão antiga do sistema mesmo depois de um deploy — foi o que obrigou a testar em aba anônima. Os assets com hash podem ser guardados para sempre, porque o nome muda a cada build.",
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/version.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live https://*.vercel.live; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://vercel.live; img-src 'self' https: data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ws: wss: http: https: https://firestore.googleapis.com https://www.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://vercel.live; frame-src https://vercel.live https://*.vercel.live; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'" },

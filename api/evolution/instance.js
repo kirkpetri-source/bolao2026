@@ -58,9 +58,16 @@ async function getOwnerNumber(ev, name) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
   try {
-    const { idToken, tenantId, action } = req.body || {};
+    // `phone` liga o modo código de pareamento: no celular ninguém consegue
+    // escanear o próprio QR Code, então o WhatsApp aceita digitar um código de
+    // 8 caracteres em "Conectar com número de telefone".
+    const { idToken, tenantId, action, phone } = req.body || {};
     if (!idToken || !tenantId || !['status', 'connect', 'disconnect'].includes(action)) {
       return res.status(400).json({ error: 'Parâmetros: idToken, tenantId, action (status|connect|disconnect)' });
+    }
+    const numero = String(phone || '').replace(/\D/g, '');
+    if (phone && numero.length < 12) {
+      return res.status(400).json({ error: 'Informe o número com DDI e DDD, por exemplo 5564999998888.' });
     }
 
     const auth = getAdminAuth();
@@ -143,6 +150,13 @@ export default async function handler(req, res) {
       if (settingsRef) {
         await settingsRef.update({ devolution: { link, instanceName: name, token: instToken } });
       }
+      // Instância recém-criada com número: pede o código de pareamento em vez
+      // do QR, que é inútil quando o organizador está no próprio celular.
+      if (numero) {
+        const pc = await ev.get(`/instance/connect/${encodeURIComponent(name)}?number=${numero}`);
+        const codigo = pc.data?.pairingCode || pc.data?.code || null;
+        if (codigo) return res.status(200).json({ state: 'connecting', pairingCode: codigo });
+      }
       const qr = r.data?.qrcode?.base64 || null;
       if (qr) return res.status(200).json({ state: 'connecting', qr });
       state = 'close';
@@ -153,10 +167,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ state, number });
     }
 
-    // Instância existe mas está desconectada: gera QR novo.
-    const r = await ev.get(`/instance/connect/${encodeURIComponent(name)}`);
+    // Instância existe mas está desconectada: gera QR novo — ou o código de
+    // pareamento, quando o organizador informou o número.
+    const rota = `/instance/connect/${encodeURIComponent(name)}${numero ? `?number=${numero}` : ''}`;
+    const r = await ev.get(rota);
     if (r.status >= 400) {
-      return res.status(502).json({ error: `Falha ao gerar QR (HTTP ${r.status})` });
+      return res.status(502).json({ error: `Falha ao conectar (HTTP ${r.status})` });
+    }
+    if (numero) {
+      const codigo = r.data?.pairingCode || r.data?.code || null;
+      if (codigo) return res.status(200).json({ state: 'connecting', pairingCode: codigo });
+      return res.status(200).json({ state: 'connecting', pairingCode: null, note: 'Código indisponível — tente novamente em instantes' });
     }
     const qr = r.data?.base64 || r.data?.qrcode?.base64 || null;
     if (!qr) return res.status(200).json({ state: 'connecting', qr: null, note: 'QR indisponível — tente novamente em instantes' });
