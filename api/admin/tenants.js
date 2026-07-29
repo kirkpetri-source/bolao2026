@@ -5,6 +5,7 @@ import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { STATUS, evaluateStatus, accessEndsAt, trialSubscription } from '../_shared/subscription.js';
 import { mascaraTaxId } from '../_shared/taxid.js';
+import { isPlatformAdmin } from '../_shared/roles.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -19,9 +20,8 @@ export default async function handler(req, res) {
     try { decoded = await getAdminAuth().verifyIdToken(idToken); }
     catch { return res.status(401).json({ error: 'Token inválido' }); }
 
-    // Só o dono da plataforma. Owner de bolão não enxerga a carteira alheia.
-    const quem = await db.collection('users').doc(decoded.uid).get();
-    if (!quem.exists || quem.data().isAdmin !== true) {
+    // Só quem opera a plataforma. Dono de bolão não enxerga a carteira alheia.
+    if (!(await isPlatformAdmin(db, decoded))) {
       return res.status(403).json({ error: 'Restrito ao administrador da plataforma' });
     }
 

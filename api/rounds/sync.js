@@ -5,6 +5,7 @@
 // exibia "Sync concluído!". O organizador via sucesso e nada acontecia.
 import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
 import { seedRoundsForTenant } from '../_shared/seedRounds.js';
+import { isPlatformAdmin } from '../_shared/roles.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -19,8 +20,7 @@ export default async function handler(req, res) {
     try { decoded = await getAdminAuth().verifyIdToken(idToken); }
     catch { return res.status(401).json({ error: 'Token inválido' }); }
 
-    const quem = await db.collection('users').doc(decoded.uid).get();
-    const adminGlobal = quem.exists && quem.data().isAdmin === true;
+    const adminGlobal = await isPlatformAdmin(db, decoded);
     if (!adminGlobal) {
       const membro = await db.collection('tenants').doc(tenantId).collection('members').doc(decoded.uid).get();
       if (!membro.exists || membro.data().role !== 'owner') {

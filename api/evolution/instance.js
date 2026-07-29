@@ -15,6 +15,7 @@ import https from 'https';
 import axios from 'axios';
 import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
+import { isPlatformAdmin } from '../_shared/roles.js';
 
 const verifyTls = process.env.EVOLUTION_VERIFY_TLS === 'true';
 const agent = new https.Agent({ rejectUnauthorized: verifyTls });
@@ -77,8 +78,7 @@ export default async function handler(req, res) {
     try { decoded = await auth.verifyIdToken(idToken); }
     catch { return res.status(401).json({ error: 'Token inválido' }); }
 
-    const callerSnap = await db.collection('users').doc(decoded.uid).get();
-    const isGlobalAdmin = callerSnap.exists && callerSnap.data().isAdmin === true;
+    const isGlobalAdmin = await isPlatformAdmin(db, decoded);
     if (!isGlobalAdmin) {
       const mem = await db.collection('tenants').doc(tenantId).collection('members').doc(decoded.uid).get();
       if (!mem.exists || mem.data().role !== 'owner') {

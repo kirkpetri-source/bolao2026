@@ -3,6 +3,7 @@
 // sintético derivado do WhatsApp e/ou senha). O email REAL é dado de contato,
 // guardado apenas no doc. Usa Admin SDK e valida que o chamador é admin.
 import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
+import { isPlatformAdmin } from '../_shared/roles.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 function normWpp(s) {
@@ -26,8 +27,7 @@ export default async function handler(req, res) {
     try { decoded = await auth.verifyIdToken(idToken); }
     catch { return res.status(401).json({ error: 'Token inválido' }); }
 
-    const callerSnap = await db.collection('users').doc(decoded.uid).get();
-    if (!callerSnap.exists || callerSnap.data().isAdmin !== true) {
+    if (!(await isPlatformAdmin(db, decoded))) {
       return res.status(403).json({ error: 'Ação restrita ao administrador' });
     }
 

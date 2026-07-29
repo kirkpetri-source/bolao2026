@@ -8,6 +8,7 @@
 // o vínculo — a conta global permanece.
 import { getAdminAuth, getAdminDb } from '../_shared/firebaseAdmin.js';
 import { releaseEmail } from '../_shared/emailIndex.js';
+import { isPlatformAdmin } from '../_shared/roles.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
@@ -28,9 +29,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Não é possível excluir a própria conta por aqui' });
     }
 
-    // Autoriza: admin global OU owner do tenant.
-    const callerSnap = await db.collection('users').doc(decoded.uid).get();
-    const isGlobalAdmin = callerSnap.exists && callerSnap.data().isAdmin === true;
+    // Autoriza: quem opera a plataforma OU o dono do bolão.
+    const isGlobalAdmin = await isPlatformAdmin(db, decoded);
     let isTenantOwner = false;
     if (!isGlobalAdmin) {
       const callerMem = await db.collection('tenants').doc(tenantId).collection('members').doc(decoded.uid).get();
