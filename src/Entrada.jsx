@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Loader2, ArrowRight, Search, ArrowLeft, LogIn } from 'lucide-react';
 import { loginWithWhatsapp } from './authService.js';
-import { ultimoBolaoVisitado } from './tenant.js';
 import { Marca } from './components/Marca.jsx';
 import { CampoSenha } from './components/CampoSenha.jsx';
 import { EsqueciSenhaModal } from './components/EsqueciSenha.jsx';
@@ -29,10 +28,6 @@ const formataTelefone = (digitos) => {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 };
 
-const nomeLegivel = (slug) =>
-  String(slug || '').split('-').filter(Boolean)
-    .map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-
 export default function Entrada() {
   const [whatsapp, setWhatsapp] = useState('');
   const [senha, setSenha] = useState('');
@@ -41,28 +36,9 @@ export default function Entrada() {
   const [esqueci, setEsqueci] = useState(false);
   const [passo, setPasso] = useState('entrar');   // 'entrar' | 'procurar'
 
-  const [ultimo] = useState(() => ultimoBolaoVisitado());
-  const [nomeDoUltimo, setNomeDoUltimo] = useState('');
-
   const [boloes, setBoloes] = useState(null);
   const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
-
-  // O nome de verdade do bolão, não o endereço com hífens: "bolao-lion-tech"
-  // não diz nada para quem só quer voltar para onde estava.
-  useEffect(() => {
-    if (!ultimo) return;
-    let cancelado = false;
-    fetch('/api/tenants/list')
-      .then(r => r.json())
-      .then(d => {
-        if (cancelado) return;
-        const achado = (d.boloes || []).find(b => b.slug === ultimo);
-        if (achado?.nome) setNomeDoUltimo(achado.nome);
-      })
-      .catch(() => {});
-    return () => { cancelado = true; };
-  }, [ultimo]);
 
   const abrirLista = async () => {
     setPasso('procurar');
@@ -174,21 +150,10 @@ export default function Entrada() {
         <Cabecalho />
 
         <div className="bg-white rounded-2xl border shadow-modal p-7">
-          {/* Atalho de quem já esteve num bolão: dentro do mesmo cartão, no
-              topo, porque é o caminho mais curto para a maioria. */}
-          {ultimo && (
-            <a href={`/${ultimo}`}
-              className="flex items-center justify-between gap-3 rounded-xl border-2 border-campo-600 bg-campo-50 dark:bg-campo-600/10 p-3.5 mb-6 hover:bg-campo-100 dark:hover:bg-campo-600/20 transition-colors">
-              <div className="min-w-0">
-                <p className="text-xs text-noite-500 mb-0.5">Você já entrou aqui antes</p>
-                <p className="font-semibold text-noite-900 truncate">
-                  {nomeDoUltimo || nomeLegivel(ultimo)}
-                </p>
-              </div>
-              <span className="v2-btn-primary px-5 py-2.5 text-sm flex-shrink-0">Abrir</span>
-            </a>
-          )}
-
+          {/* NÃO mostramos o "último bolão visitado" aqui. O login já leva a
+              pessoa ao bolão dela, e aquele atalho vinha do navegador, não da
+              conta: em computador compartilhado exibia o bolão de outra
+              pessoa, e no melhor caso repetia o que o login já faz. */}
           <h1 className="font-display text-2xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>
             ENTRAR NO SEU BOLÃO
           </h1>
