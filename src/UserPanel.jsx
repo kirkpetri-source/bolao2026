@@ -36,17 +36,6 @@ const UserPanel = ({ setView }) => {
   // WhatsApp do organizador, para o participante falar com quem pode resolver.
   const contatoDoOrganizador = (users.find(u => u.isAdmin)?.whatsapp || '').replace(/\D/g, '');
 
-  // Confirmação de entrada. Com vários bolões na mesma plataforma, um link
-  // errado levava a pessoa a se cadastrar e palpitar no bolão de outra sem
-  // perceber. Aparece uma vez por sessão, e só para participante.
-  const chaveConfirmacao = `bolao-confirmado:${currentUser?.id}:${tenantId}`;
-  const [confirmado, setConfirmado] = useState(() => {
-    try { return sessionStorage.getItem(chaveConfirmacao) === '1'; } catch { return true; }
-  });
-  const confirmarEntrada = () => {
-    try { sessionStorage.setItem(chaveConfirmacao, '1'); } catch { /* sem sessionStorage: só não lembra */ }
-    setConfirmado(true);
-  };
   const [selectedRound, setSelectedRound] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingPredictions, setPendingPredictions] = useState(null);
@@ -1517,35 +1506,15 @@ const UserPanel = ({ setView }) => {
     return selectedFinishedRound ? getRoundPrize(selectedFinishedRound) : null;
   }, [selectedFinishedRound, settings]);
 
-  if (!confirmado) {
-    return (
-      <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
-        <div className="bg-white rounded-2xl border shadow-modal max-w-md w-full p-7 text-center animate-slide-up">
-          <div className="w-14 h-14 rounded-2xl bg-campo-600 flex items-center justify-center mx-auto mb-5">
-            <Trophy size={26} className="text-ouro-500" />
-          </div>
-          <p className="text-noite-400 text-xs font-semibold uppercase mb-2" style={{ letterSpacing: '0.18em' }}>
-            Você está entrando no bolão
-          </p>
-          <h1 className="font-display text-3xl text-noite-900 mb-4 break-words" style={{ letterSpacing: '0.02em' }}>
-            {nomeDoBolao}
-          </h1>
-          <p className="text-sm text-noite-500 leading-relaxed mb-6">
-            Confira se é o bolão em que você se cadastrou. Seus palpites e pagamentos
-            valem só aqui dentro.
-          </p>
-          <button onClick={confirmarEntrada} className="v2-btn-primary w-full py-3 text-base mb-3">
-            Sim, é este — entrar
-          </button>
-          <button
-            onClick={() => { logout(); setView('login'); }}
-            className="text-sm text-noite-400 hover:text-noite-700">
-            Não é este bolão, sair
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // A tela "você está entrando no bolão X — sim, é este" saiu daqui.
+  //
+  // Ela existia quando havia várias portas de entrada e um link errado podia
+  // levar a pessoa a palpitar no bolão de outro sem perceber. Com a entrada
+  // única, o sistema leva cada um ao bolão em que está cadastrado e o cadastro
+  // exige escolher o bolão numa lista — a confirmação virou um passo a mais
+  // para dizer o que o cabeçalho já mostra o tempo todo. Pior: era a última
+  // tela com o logotipo antigo, e parecia ao organizador que a tela que a
+  // gente tinha removido havia voltado.
 
   return (
     <div className="min-h-screen page-bg font-body">

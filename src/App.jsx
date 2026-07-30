@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react';
-import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Eye, EyeOff, Plus, Edit2, Trash2, Upload, ExternalLink, X, UserPlus, Target, Award, ChevronDown, ChevronUp, Check, Key, DollarSign, CheckCircle, XCircle, AlertCircle, FileText, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
+import { Trophy, Users, Calendar, Clock, TrendingUp, LogOut, Plus, Edit2, Trash2, Upload, ExternalLink, Target, Award, ChevronDown, ChevronUp, Check, DollarSign, XCircle, AlertCircle, Download, Store, Filter, Loader2, Megaphone, Send, Search, Bell, Copy, RefreshCcw, History, Moon, Sun } from 'lucide-react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, getDocs, getDoc, onSnapshot, serverTimestamp, query, where, orderBy, limit } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import axios from 'axios';
@@ -11,16 +11,13 @@ import NovaVersao from './components/NovaVersao.jsx';
 import Plataforma from './Plataforma.jsx';
 import Entrada from './Entrada.jsx';
 import Landing from './Landing.jsx';
-import { CampoSenha } from './components/CampoSenha.jsx';
-import { EsqueciSenhaModal } from './components/EsqueciSenha.jsx';
-import { validaSenha, MIN_SENHA } from '../api/_shared/senha.js';
 import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
-import { RulesCard, DarkToggle } from './components/shared.jsx';
+import { DarkToggle } from './components/shared.jsx';
 import UserPanel from './UserPanel.jsx';
 import AdminPanel from './AdminPanel.jsx';
-import { loginWithWhatsapp, registerWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
+import { loginWithWhatsapp, logout as fbLogout, observeAuth, authErrorMessage, changeOwnPassword, changeMyPassword, adminCreateUser, getIdToken } from './authService.js';
 
 
 const initializeDatabase = async (tenantId) => {
@@ -667,309 +664,14 @@ const AppProvider = ({ children }) => {
 };
 
 
-const LoginScreen = ({ setView }) => {
-  const { users, login, addUser, updateUser, settings, establishments } = useApp();
-  const [whatsapp, setWhatsapp] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  // O convite do organizador aponta para ?cadastro=1: quem chega pelo link do
-  // amigo cai direto no formulário, sem ter que descobrir onde se cadastra.
-  const [showRegister, setShowRegister] = useState(() => {
-    try { return new URLSearchParams(window.location.search).get('cadastro') === '1'; }
-    catch { return false; }
-  });
-  const [reg, setReg] = useState({ name: '', whatsapp: '', password: '', confirmPassword: '', establishmentId: '' });
-  const [showRulesModal, setShowRulesModal] = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
-
-  const normalizeWhatsapp = (s) => {
-    const d = (s || '').replace(/\D/g, '');
-    // Brasil: use os últimos 11 dígitos (DDD + número), removendo código do país se presente
-    return d.length > 11 ? d.slice(-11) : d;
-  };
-
-  const handleLogin = async () => {
-    const phone = normalizeWhatsapp(whatsapp);
-    if (!phone || !password) { setError('Informe WhatsApp e senha'); return; }
-    let user = null;
-    try {
-      user = await loginWithWhatsapp(phone, password);
-    } catch (err) {
-      setError(authErrorMessage(err));
-      return;
-    }
-    // Define currentUser imediatamente (o observer de Auth confirma em seguida).
-    login(user);
-    // Se manutenção ativa e o usuário não é admin, redireciona para tela de manutenção.
-    if (settings?.maintenanceMode && !user.isAdmin) {
-      setView('maintenance');
-      setError('');
-      return;
-    }
-    setView(user.isAdmin ? 'admin' : 'user');
-    setError('');
-  };
-
-  const handleRegister = async () => {
-    if (settings?.maintenanceMode) {
-      setError('Cadastro temporariamente indisponível durante a manutenção.');
-      return;
-    }
-    if (!reg.name || !reg.whatsapp || !reg.password) return setError('Preencha todos!');
-    if (reg.password !== reg.confirmPassword) return setError('Senhas diferentes!');
-    // A regra é a mesma do servidor (api/_shared/senha.js): antes o único
-    // critério era o mínimo do Firebase, e o WhatsApp — que está no grupo —
-    // servia de senha para quem quisesse.
-    const checagem = validaSenha(reg.password, { whatsapp: reg.whatsapp, nome: reg.name });
-    if (!checagem.ok) return setError(checagem.erro);
-    const phone = normalizeWhatsapp(reg.whatsapp);
-    if (users.find(u => normalizeWhatsapp(u.whatsapp) === phone)) return setError('WhatsApp já cadastrado!');
-    try {
-      await addUser({ name: reg.name, whatsapp: phone, password: reg.password, isAdmin: false, balance: 0, establishmentId: reg.establishmentId || null });
-      alert('✅ Cadastrado! Faça login para entrar.');
-      setShowRegister(false);
-      setWhatsapp(phone);
-      setReg({ name: '', whatsapp: '', password: '', confirmPassword: '', establishmentId: '' });
-      setError('');
-    } catch (e) {
-      setError(authErrorMessage(e));
-    }
-  };
-
-  if (showRegister) {
-    return (
-      <div className="min-h-screen font-body flex flex-col lg:flex-row">
-        {/* ── Left: decorative panel ── */}
-        <div className="login-hero hidden lg:flex lg:w-5/12 xl:w-1/2 flex-col relative overflow-hidden p-10 xl:p-14 min-h-screen">
-          <div className="absolute top-0 right-0 w-px h-full bg-gradient-to-b from-transparent via-ouro-500/40 to-transparent pointer-events-none" />
-          <div className="flex items-center gap-3 mb-auto">
-            <div className="w-9 h-9 bg-campo-600 rounded-xl flex items-center justify-center flex-shrink-0">
-              <Trophy size={17} className="text-ouro-500" />
-            </div>
-            <span className="font-display text-white text-base" style={{ letterSpacing: '0.2em' }}>BOLÃO BRASILEIRÃO</span>
-          </div>
-          <div className="my-auto pb-12">
-            <p className="text-campo-400 text-xs font-semibold uppercase mb-5" style={{ letterSpacing: '0.25em' }}>Nova conta</p>
-            <h2 className="font-display text-white leading-none" style={{ fontSize: 'clamp(56px, 8vw, 88px)' }}>
-              JUNTE-SE<br />
-              <span className="text-ouro-500">AO BOLÃO</span>
-            </h2>
-            <p className="text-noite-500 text-sm mt-6 max-w-xs leading-relaxed font-medium">
-              Faça seus palpites, dispute com amigos e concorra a prêmios em cada rodada do Brasileirão 2026.
-            </p>
-          </div>
-          <div className="flex gap-1.5">
-            <div className="h-1 flex-1 bg-campo-600 rounded-full" />
-            <div className="h-1 flex-1 bg-ouro-500 rounded-full" />
-            <div className="h-1 flex-[2] bg-white/10 rounded-full" />
-          </div>
-        </div>
-
-        {/* ── Right: form ── */}
-        <div className="flex-1 bg-white dark:bg-[#0C1C10] flex items-center justify-center p-6 sm:p-10 min-h-screen relative">
-          <div className="absolute top-4 right-4">
-            <DarkToggle variant="light" />
-          </div>
-          <div className="w-full max-w-md animate-slide-up">
-            {/* Mobile logo */}
-            <div className="flex lg:hidden items-center gap-2 mb-8">
-              <div className="w-8 h-8 bg-campo-600 rounded-lg flex items-center justify-center">
-                <Trophy size={14} className="text-ouro-500" />
-              </div>
-              <span className="font-display text-noite-900 text-base" style={{ letterSpacing: '0.2em' }}>BOLÃO BRASILEIRÃO</span>
-            </div>
-            <div className="mb-7">
-              <h2 className="font-display text-4xl text-noite-900" style={{ letterSpacing: '0.04em' }}>CRIAR CONTA</h2>
-              {/* O nome do bolão precisa estar na cara de quem se cadastra: com
-                  vários bolões na plataforma, um link errado faz a pessoa
-                  entrar no bolão de outra sem perceber. */}
-              <div className="mt-3 rounded-xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase text-noite-500" style={{ letterSpacing: '0.14em' }}>
-                  Você está se cadastrando no bolão
-                </p>
-                <p className="font-display text-lg text-noite-900 break-words" style={{ letterSpacing: '0.02em' }}>
-                  {settings?.brandName?.trim() || 'Bolão Brasileirão'}
-                </p>
-              </div>
-            </div>
-            {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm animate-bounce-in">{error}</div>}
-            <div className="space-y-4">
-              <div>
-                <label className="v2-label">Nome</label>
-                <input type="text" placeholder="Seu nome completo" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} className="v2-input" />
-              </div>
-              <div>
-                <label className="v2-label">WhatsApp</label>
-                <input type="tel" placeholder="11999999999" value={reg.whatsapp} onChange={(e) => setReg({ ...reg, whatsapp: e.target.value.replace(/\D/g, '') })} className="v2-input" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <CampoSenha rotulo="Senha" valor={reg.password} medidor autoComplete="new-password"
-                  placeholder={`Mín. ${MIN_SENHA} caracteres`}
-                  onChange={(v) => setReg({ ...reg, password: v })} />
-                <CampoSenha rotulo="Confirmar" valor={reg.confirmPassword} autoComplete="new-password"
-                  placeholder="Repita a senha"
-                  onChange={(v) => setReg({ ...reg, confirmPassword: v })} />
-              </div>
-              {establishments.length > 0 && (
-                <div>
-                  <label className="v2-label">Estabelecimento</label>
-                  <select value={reg.establishmentId} onChange={(e) => setReg({ ...reg, establishmentId: e.target.value })} className="v2-input">
-                    <option value="">Nenhum (participação direta)</option>
-                    {establishments.map(est => <option key={est.id} value={est.id}>{est.name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div className="pt-2 space-y-3">
-                <button onClick={handleRegister} className="v2-btn-primary w-full py-3.5 text-base">Criar Conta</button>
-                <button onClick={() => { setShowRegister(false); setError(''); }} className="v2-btn-outline w-full py-3">Já tenho conta</button>
-                <button onClick={() => setShowRulesModal(true)} className="v2-btn-ghost w-full py-2.5 text-sm">
-                  <FileText size={16} /> Ver Regras
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {showRulesModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-            <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-modal animate-slide-up">
-              <div className="p-6 border-b flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <FileText className="text-campo-600" size={24} />
-                  <h3 className="font-display text-2xl text-noite-900" style={{ letterSpacing: '0.04em' }}>REGRAS DO BOLÃO</h3>
-                </div>
-                <button onClick={() => setShowRulesModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
-              </div>
-              <div className="p-6"><RulesCard /></div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen font-body flex flex-col lg:flex-row">
-      {/* ── Left: hero panel ── */}
-      <div className="login-hero hidden lg:flex lg:w-5/12 xl:w-1/2 flex-col relative overflow-hidden p-10 xl:p-14 min-h-screen">
-        <div className="absolute top-0 right-0 w-px h-full bg-gradient-to-b from-transparent via-ouro-500/40 to-transparent pointer-events-none" />
-        <div className="flex items-center gap-3 mb-auto">
-          <div className="w-9 h-9 bg-campo-600 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Trophy size={17} className="text-ouro-500" />
-          </div>
-          <span className="font-display text-white text-base" style={{ letterSpacing: '0.2em' }}>BOLÃO BRASILEIRÃO</span>
-        </div>
-        <div className="flex-1 flex flex-col justify-center py-12">
-          <p className="text-campo-400 text-xs font-semibold uppercase mb-5" style={{ letterSpacing: '0.28em' }}>Você está entrando no bolão</p>
-          {/* O nome do bolão é o destaque: com cada bolão num endereço próprio, é
-              a única coisa que diz à pessoa se ela está no lugar certo. */}
-          <h1 className="font-display leading-none">
-            <span className="block text-ouro-500 break-words" style={{ fontSize: 'clamp(40px, 6.5vw, 76px)' }}>
-              {settings?.brandName?.trim() || 'BOLÃO BRASILEIRÃO'}
-            </span>
-            <span className="block text-noite-600" style={{ fontSize: 'clamp(24px, 3.4vw, 38px)', marginTop: '8px' }}>BRASILEIRÃO 2026 — SÉRIE A</span>
-          </h1>
-          <p className="text-noite-500 text-sm mt-8 max-w-xs leading-relaxed font-medium">
-            Faça seus palpites rodada a rodada e concorra a prêmios. A maior competição de bolão do futebol brasileiro.
-          </p>
-        </div>
-        <div className="flex gap-1.5">
-          <div className="h-1 flex-1 bg-campo-600 rounded-full" />
-          <div className="h-1 flex-1 bg-ouro-500 rounded-full" />
-          <div className="h-1 flex-[2] bg-white/10 rounded-full" />
-        </div>
-      </div>
-
-      {/* ── Right: form ── */}
-      <div className="flex-1 bg-white dark:bg-[#0C1C10] flex items-center justify-center p-6 sm:p-10 min-h-screen relative">
-        <div className="absolute top-4 right-4">
-          <DarkToggle variant="light" />
-        </div>
-        <div className="w-full max-w-sm animate-fade-in">
-          {/* Mobile logo */}
-          <div className="flex lg:hidden items-center gap-2 mb-8">
-            <div className="w-8 h-8 bg-campo-600 rounded-lg flex items-center justify-center">
-              <Trophy size={14} className="text-ouro-500" />
-            </div>
-            <span className="font-display text-noite-900 text-base" style={{ letterSpacing: '0.2em' }}>BOLÃO BRASILEIRÃO</span>
-          </div>
-
-          <div className="mb-8">
-            {/* Repetido aqui porque no celular o painel da esquerda não aparece. */}
-            <div className="rounded-xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 px-4 py-3 mb-4">
-              <p className="text-[11px] font-semibold uppercase text-noite-500" style={{ letterSpacing: '0.14em' }}>
-                Bolão
-              </p>
-              <p className="font-display text-lg text-noite-900 break-words" style={{ letterSpacing: '0.02em' }}>
-                {settings?.brandName?.trim() || 'Bolão Brasileirão'}
-              </p>
-            </div>
-            <h2 className="font-display text-5xl text-noite-900" style={{ letterSpacing: '0.04em' }}>ENTRAR</h2>
-            <p className="text-noite-400 text-sm mt-1.5">Acesse sua conta para fazer seus palpites</p>
-          </div>
-
-          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-5 text-sm animate-bounce-in">{error}</div>}
-
-          <div className="space-y-4">
-            <div>
-              <label className="v2-label">WhatsApp</label>
-              <input type="tel" placeholder="11999999999" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className="v2-input" />
-            </div>
-            <div>
-              <label className="v2-label">Senha</label>
-              <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleLogin()} className="v2-input pr-12" />
-                <button onClick={() => setShowPassword(!showPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-noite-400 hover:text-noite-700 transition-colors">
-                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
-                </button>
-              </div>
-            </div>
-            <div className="pt-2 space-y-3">
-              <button onClick={handleLogin} className="v2-btn-primary w-full py-3.5 text-base">Entrar</button>
-              <div className="flex items-center justify-center gap-3 text-sm">
-                <button onClick={() => { setError(''); setShowForgot(true); }} className="text-noite-400 hover:text-campo-600 transition-colors">
-                  Esqueci minha senha
-                </button>
-                <span className="text-noite-200">•</span>
-                <button onClick={() => setShowRulesModal(true)} className="text-noite-400 hover:text-campo-600 transition-colors">
-                  Ver regras
-                </button>
-              </div>
-              <button onClick={() => { setShowRegister(true); setError(''); }} className="v2-btn-outline w-full py-3">
-                <UserPlus size={18} /> Criar minha conta neste bolão
-              </button>
-            </div>
-          </div>
-
-          {/* O cartão "quer organizar um bolão?" saiu daqui: quem abre o link
-              de um bolão foi convidado para JOGAR. A oferta para organizador
-              tem página própria (a raiz do site) e aqui só competia com a ação
-              de quem chegou para palpitar. */}
-        </div>
-      </div>
-
-      {showRulesModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-modal animate-slide-up">
-            <div className="p-6 border-b flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <FileText className="text-campo-600" size={24} />
-                <h3 className="font-display text-2xl text-noite-900" style={{ letterSpacing: '0.04em' }}>REGRAS DO BOLÃO</h3>
-              </div>
-              <button onClick={() => setShowRulesModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
-            </div>
-            <div className="p-6"><RulesCard /></div>
-          </div>
-        </div>
-      )}
-      {showForgot && (
-        <EsqueciSenhaModal initialWhatsapp={whatsapp} onClose={() => setShowForgot(false)} />
-      )}
-    </div>
-  );
-};
-
+// A tela de login POR BOLÃO deixou de existir.
+//
+// Havia duas portas de entrada com layout, tipografia e até logotipo
+// diferentes: esta e a /entrar. Qual delas o participante via dependia de como
+// tinha chegado — pelo link do organizador ou digitando o endereço do site.
+// Agora existe uma só: quem abre o link de um bolão sem estar logado é levado
+// para /entrar?bolao=<slug>, que já traz o bolão selecionado no cadastro.
+//
 const MaintenanceScreen = () => {
   const { settings } = useApp();
   const brand = settings?.brandName || 'Bolão Brasileiro 2026';
@@ -1069,7 +771,14 @@ function App() {
     );
   }
 
-  // A rota da plataforma tem tela própria e não passa pelo fluxo do bolão.
+  // O convite do organizador aponta para ?cadastro=1: quem chega por ele quer
+// se cadastrar, não fazer login.
+function chegouParaCadastrar() {
+  try { return new URLSearchParams(window.location.search).get('cadastro') === '1'; }
+  catch { return false; }
+}
+
+// A rota da plataforma tem tela própria e não passa pelo fluxo do bolão.
   if (naPlataforma) return <Plataforma />;
 
   // Conta que só opera a plataforma não tem bolão para abrir: em vez de cair
@@ -1132,7 +841,21 @@ function App() {
     );
   }
 
-  if (!currentUser || view === 'login') return <LoginScreen setView={setView} />;
+  // Sem sessão, o endereço do bolão manda para a tela única de entrada,
+  // levando o bolão junto — assim o link que o organizador já distribuiu
+  // continua valendo e o cadastro nasce no bolão certo.
+  if (!currentUser || view === 'login') {
+    const destino = `/entrar?bolao=${encodeURIComponent(tenantId || '')}`
+      + (chegouParaCadastrar() ? '&cadastro=1' : '');
+    window.location.replace(destino);
+    return (
+      <div className="min-h-screen page-bg flex items-center justify-center font-body">
+        <div className="flex items-center gap-3 text-noite-400">
+          <Loader2 size={20} className="animate-spin" /> Abrindo...
+        </div>
+      </div>
+    );
+  }
   // Gating global: se manutenção estiver ativa, usuários logados não-admin são direcionados à tela de manutenção
   if (settings?.maintenanceMode && (currentUser && !currentUser.isAdmin)) {
     return <MaintenanceScreen />;

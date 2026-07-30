@@ -71,10 +71,18 @@ export function publicConfigDocId(tid) {
   return tid === DEFAULT_TENANT_ID ? 'main' : tid;
 }
 
-// Endereço do bolão: curto, sem parâmetro, fácil de ditar por telefone.
+// Convite do organizador. Aponta para a tela única de entrada, já com o bolão
+// escolhido e o cadastro aberto.
+//
+// Antes era o endereço curto /nome-do-bolao, que abria uma tela de login
+// PRÓPRIA daquele bolão — outra tela, outro layout, outra logo. Existir duas
+// portas de entrada confundia quem chegava por um caminho e voltava pelo outro.
+// O endereço curto continua funcionando (há links já enviados no WhatsApp de
+// muita gente): ele redireciona para cá.
 export function inviteUrl(tid) {
-  try { return `${window.location.origin}/${encodeURIComponent(tid)}`; }
-  catch { return `/${tid}`; }
+  const caminho = `/entrar?bolao=${encodeURIComponent(tid)}&cadastro=1`;
+  try { return `${window.location.origin}${caminho}`; }
+  catch { return caminho; }
 }
 
 // Mensagem pronta para o organizador colar no grupo.
@@ -98,8 +106,18 @@ export function sincronizarUrlComTenant(tid) {
     const partes = atual.split('/').filter(Boolean);
     // Não mexe em rotas do site (/plataforma, /ranking/123).
     if (partes.length > 1) return;
-    if (partes.length === 1 && CAMINHOS_RESERVADOS.has(partes[0].toLowerCase())) return;
-    if (partes[0] === tid) return;
-    window.history.replaceState({}, '', `/${tid}${window.location.search || ''}`);
+
+    const primeira = (partes[0] || '').toLowerCase();
+    // /entrar é a exceção entre as rotas reservadas: é de onde a pessoa ACABOU
+    // de entrar. Deixar a barra em /entrar depois do login esconderia em qual
+    // bolão ela está e tiraria dela o link para mandar a um amigo.
+    const veioDoLogin = primeira === 'entrar';
+    if (partes.length === 1 && CAMINHOS_RESERVADOS.has(primeira) && !veioDoLogin) return;
+    if (primeira === tid) return;
+
+    // Vindo do login, a query (?bolao=&cadastro=1) é lixo do convite: carregá-la
+    // adiante reabriria o cadastro dentro do bolão já aberto.
+    const busca = veioDoLogin ? '' : (window.location.search || '');
+    window.history.replaceState({}, '', `/${tid}${busca}`);
   } catch { /* navegador sem history: só não sincroniza */ }
 }

@@ -19,9 +19,20 @@ export default async function handler(req, res) {
     const db = getAdminDb();
     const snap = await db.collection('tenants').get();
 
+    // ?slug= é o bolão do convite. Ele precisa aparecer para quem chegou pelo
+    // link MESMO estando fora da lista pública: bolão de empresa ou de família
+    // costuma ser fechado, e sem isso o convidado não teria como se cadastrar.
+    // Bloqueado continua fora, inclusive aqui.
+    const convite = String(req.query?.slug || '').trim().toLowerCase();
+    let convidado = null;
+
     const boloes = [];
     for (const d of snap.docs) {
       const t = d.data();
+
+      if (convite && d.id === convite && !isBlocked(t.subscription)) {
+        convidado = { slug: d.id, nome: t.name || d.id };
+      }
 
       // O bolão da própria plataforma não é produto de ninguém.
       if (d.id === DEFAULT_TENANT_ID) continue;
@@ -37,10 +48,16 @@ export default async function handler(req, res) {
 
     boloes.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 
+    // O convidado entra na lista quando não estava nela, para o formulário de
+    // cadastro conseguir pré-selecioná-lo.
+    if (convidado && !boloes.some(b => b.slug === convidado.slug)) {
+      boloes.unshift(convidado);
+    }
+
     // Lista muda pouco; cache curto alivia a origem sem deixar bolão novo
     // invisível por muito tempo.
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=120');
-    return res.status(200).json({ boloes });
+    return res.status(200).json({ boloes, convidado });
   } catch (err) {
     console.error('tenants/list:', err.message);
     return res.status(500).json({ error: 'Erro ao listar os bolões' });
