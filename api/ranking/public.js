@@ -8,17 +8,11 @@
 import { getAdminDb } from '../_shared/firebaseAdmin.js';
 import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { matchCountsForScoring } from '../_shared/matchStatus.js';
-
-// Mesma regra de pontuação da tela.
-function calcPoints(ph, pa, rh, ra) {
-  if (ph === rh && pa === ra) return 10;                    // placar exato
-  const rp = ph - pa, rr = rh - ra;
-  const mesmoLado = (rp > 0 && rr > 0) || (rp < 0 && rr < 0) || (rp === 0 && rr === 0);
-  if (!mesmoLado) return 0;                                 // errou o vencedor
-  if (rp === rr) return 7;                                  // acertou o saldo
-  if (ph === rh || pa === ra) return 5;                     // acertou um placar
-  return 3;                                                 // só o vencedor
-}
+// A regra vive num módulo só. Esta página tinha uma cópia com outra escala de
+// pontos (10/7/5/3), então o ranking público podia sair em ordem diferente da
+// do painel e da mensagem do WhatsApp — na tela que define o prêmio.
+import { calcPoints } from '../_shared/scoring.js';
+import { rateio, percentuaisDe } from '../_shared/rateio.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -77,8 +71,9 @@ export default async function handler(req, res) {
       return { name: nomes[c.userId] || 'Participante', cartelaCode: c.cartelaCode, points: pts };
     }).sort((a, b) => b.points - a.points);
 
+    // A taxa é a que o organizador escolheu no painel; sem escolha, o padrão.
     const totalPaid = ranking.length * betValue;
-    const prizePool = totalPaid * 0.85;
+    const { premio: prizePool } = rateio(totalPaid, percentuaisDe(settings));
     const maxPts = ranking[0]?.points ?? 0;
     const winners = ranking.filter(r => r.points === maxPts);
 
