@@ -99,8 +99,8 @@ function CartaoResultado() {
 
   return (
     <div className="rounded-2xl overflow-hidden"
-      style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(6px)' }}>
-      <div className="px-6 pt-6 pb-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      style={{ background: 'rgba(255,255,255,0.045)', border: '1px solid rgba(110,231,165,0.14)', backdropFilter: 'blur(6px)' }}>
+      <div className="px-6 pt-6 pb-5" style={{ borderBottom: '1px solid rgba(110,231,165,0.12)' }}>
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase" style={{ letterSpacing: '0.16em', color: '#9fb3a6' }}>
@@ -240,7 +240,7 @@ function Calculadora({ onCriar }) {
 
   return (
     <div className="rounded-2xl p-6 sm:p-8"
-      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(110,231,165,0.14)' }}>
       <div className="grid lg:grid-cols-2 gap-8">
         <div className="space-y-7">
           <Faixa rotulo="Cartelas vendidas na rodada" valor={participantes} min={5} max={100} passo={1}
@@ -300,7 +300,7 @@ function Calculadora({ onCriar }) {
                       {real(conta.administracao)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 pt-1.5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="flex items-center justify-between gap-3 pt-1.5" style={{ borderTop: '1px solid rgba(110,231,165,0.10)' }}>
                     <span className="text-sm" style={{ color: '#9fb3a6' }}>
                       No mês, com {RODADAS_POR_MES} rodadas
                     </span>
@@ -475,7 +475,13 @@ export default function Landing({ setView }) {
   const cartelasMinimas = cartelasParaPagarMensalidade(PROMO_PRICE_CENTS, 15);
 
   return (
-    <div className="min-h-screen font-body" style={{ background: '#060912' }}>
+    <div className="min-h-screen font-body"
+      style={{
+        // Degradê no lugar de cor chapada: verde mais vivo em cima, onde está
+        // o argumento de venda, escurecendo até o rodapé. Fundo chapado escuro
+        // era o que fazia a página parecer "apagada".
+        background: 'linear-gradient(180deg, #062a17 0%, #04170d 42%, #04170d 100%)',
+      }}>
       <style>{`
         @keyframes bb-pop { from { opacity: 0; transform: scale(.96) } to { opacity: 1; transform: none } }
         @keyframes bb-flutua { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-9px) } }
@@ -495,7 +501,7 @@ export default function Landing({ setView }) {
         .bb-faixa::-webkit-slider-thumb {
           -webkit-appearance: none; appearance: none;
           width: 24px; height: 24px; border-radius: 50%;
-          background: #FFD700; border: 3px solid #060912;
+          background: #FFD700; border: 3px solid #04170d;
           box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(255,215,0,.5);
           cursor: grab; transition: transform .12s ease;
         }
@@ -503,7 +509,7 @@ export default function Landing({ setView }) {
         .bb-faixa:active::-webkit-slider-thumb { transform: scale(1.05); cursor: grabbing }
         .bb-faixa::-moz-range-thumb {
           width: 22px; height: 22px; border-radius: 50%;
-          background: #FFD700; border: 3px solid #060912;
+          background: #FFD700; border: 3px solid #04170d;
           box-shadow: 0 2px 10px rgba(0,0,0,.5); cursor: grab;
         }
         .bb-faixa::-moz-range-track { background: transparent }
@@ -518,7 +524,7 @@ export default function Landing({ setView }) {
       {/* ── Topo ───────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 transition-all"
         style={{
-          background: rolou ? 'rgba(6,9,18,0.88)' : 'transparent',
+          background: rolou ? 'rgba(4,23,13,0.92)' : 'transparent',
           backdropFilter: rolou ? 'blur(10px)' : 'none',
           borderBottom: `1px solid ${rolou ? 'rgba(255,255,255,0.08)' : 'transparent'}`,
         }}>
@@ -547,9 +553,10 @@ export default function Landing({ setView }) {
         <div className="absolute inset-0 pointer-events-none" aria-hidden="true"
           style={{
             background:
-              'radial-gradient(1100px 520px at 18% -10%, rgba(0,133,66,0.5), transparent 60%),' +
-              'radial-gradient(760px 420px at 88% 8%, rgba(255,215,0,0.13), transparent 62%),' +
-              'repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0 60px, transparent 60px 120px)',
+              'radial-gradient(1200px 560px at 15% -12%, rgba(16,185,87,0.34), transparent 62%),' +
+              'radial-gradient(820px 460px at 88% 4%, rgba(255,215,0,0.16), transparent 64%),' +
+              'radial-gradient(900px 500px at 50% 120%, rgba(0,133,66,0.30), transparent 68%),' +
+              'repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0 60px, transparent 60px 120px)',
           }} />
 
         <div className="relative max-w-6xl mx-auto px-5 pt-12 pb-16 md:pt-20 md:pb-24">
@@ -622,7 +629,7 @@ export default function Landing({ setView }) {
       </section>
 
       {/* ── Calculadora ────────────────────────────────────────────────────── */}
-      <section id="conta" style={{ background: '#0a0f1a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+      <section id="conta" style={{ background: '#06200f', borderTop: '1px solid rgba(110,231,165,0.10)' }}>
         <div className="max-w-6xl mx-auto px-5 py-16 md:py-20">
           <Revela>
             <h2 className="font-display text-center mb-3" style={{ fontSize: 'clamp(26px, 3.6vw, 40px)', color: '#f2f6f3' }}>
@@ -652,7 +659,7 @@ export default function Landing({ setView }) {
           ].map(([n, titulo, texto], i) => (
             <Revela key={n} delay={i * 90}>
               <div className="bb-card h-full rounded-2xl p-6"
-                style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.09)' }}>
+                style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(110,231,165,0.13)' }}>
                 <p className="font-display mb-4" style={{ color: 'rgba(255,215,0,0.55)', fontSize: '1.5rem' }}>{n}</p>
                 <h3 className="font-display text-lg mb-2" style={{ color: '#f2f6f3', letterSpacing: '0.02em' }}>
                   {titulo.toUpperCase()}
@@ -667,7 +674,7 @@ export default function Landing({ setView }) {
       {/* ── Painel por dentro (prints do sistema real) ──────────────────────
           Só renderiza quando existem arquivos em /public/prints. */}
       {PRINTS.length > 0 && (
-        <section style={{ background: '#0a0f1a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+        <section style={{ background: '#06200f', borderTop: '1px solid rgba(110,231,165,0.10)' }}>
           <div className="max-w-6xl mx-auto px-5 py-16 md:py-20">
             <Revela>
               <h2 className="font-display text-center mb-3" style={{ fontSize: 'clamp(26px, 3.6vw, 40px)', color: '#f2f6f3' }}>
@@ -686,7 +693,7 @@ export default function Landing({ setView }) {
                     style={{
                       background: print === i ? '#FFD700' : 'rgba(255,255,255,0.06)',
                       color: print === i ? '#0a0f1a' : '#cfe6d6',
-                      border: '1px solid rgba(255,255,255,0.09)',
+                      border: '1px solid rgba(110,231,165,0.13)',
                     }}>
                     {p.rotulo}
                   </button>
@@ -697,7 +704,7 @@ export default function Landing({ setView }) {
                 style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.35)' }}>
                 {/* Moldura de janela: dá contexto de "é um sistema", sem simular
                     navegador de verdade (o que confundiria com print falso). */}
-                <div className="flex items-center gap-1.5 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="flex items-center gap-1.5 px-4 py-3" style={{ borderBottom: '1px solid rgba(110,231,165,0.12)' }}>
                   {['#ef6461', '#f9c74f', '#34d375'].map(c => (
                     <span key={c} className="w-2.5 h-2.5 rounded-full" style={{ background: c, opacity: 0.7 }} />
                   ))}
@@ -715,7 +722,7 @@ export default function Landing({ setView }) {
       )}
 
       {/* ── Recursos ───────────────────────────────────────────────────────── */}
-      <section style={{ background: PRINTS.length > 0 ? '#060912' : '#0a0f1a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+      <section style={{ background: PRINTS.length > 0 ? '#04170d' : '#06200f', borderTop: '1px solid rgba(110,231,165,0.10)' }}>
         <div className="max-w-6xl mx-auto px-5 py-16 md:py-20">
           <Revela>
             <h2 className="font-display text-center mb-3" style={{ fontSize: 'clamp(26px, 3.6vw, 40px)', color: '#f2f6f3' }}>
@@ -731,7 +738,7 @@ export default function Landing({ setView }) {
               return (
                 <Revela key={recurso.titulo} delay={(i % 3) * 80}>
                   <div className="bb-card h-full rounded-2xl p-6"
-                    style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.09)' }}>
+                    style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(110,231,165,0.13)' }}>
                     <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4"
                       style={{ background: 'rgba(0,133,66,0.22)', border: '1px solid rgba(16,185,87,0.3)' }}>
                       <Icone size={20} style={{ color: '#6ee7a5' }} />
@@ -777,7 +784,7 @@ export default function Landing({ setView }) {
       </section>
 
       {/* ── Antes e depois ─────────────────────────────────────────────────── */}
-      <section style={{ background: '#0a0f1a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+      <section style={{ background: '#06200f', borderTop: '1px solid rgba(110,231,165,0.10)' }}>
         <div className="max-w-5xl mx-auto px-5 py-16 md:py-20">
           <Revela>
             <h2 className="font-display text-center mb-3" style={{ fontSize: 'clamp(26px, 3.6vw, 40px)', color: '#f2f6f3' }}>
@@ -867,7 +874,7 @@ export default function Landing({ setView }) {
             </div>
 
             <div className="mt-5 flex items-start gap-3 rounded-xl p-4"
-              style={{ border: '1px solid rgba(255,255,255,0.09)' }}>
+              style={{ border: '1px solid rgba(110,231,165,0.13)' }}>
               <Wallet size={18} style={{ color: '#9fb3a6', flexShrink: 0, marginTop: 2 }} />
               <p className="text-sm leading-relaxed" style={{ color: '#9fb3a6' }}>
                 A mensalidade é a nossa única cobrança — não tiramos percentual das
@@ -881,7 +888,7 @@ export default function Landing({ setView }) {
       </section>
 
       {/* ── Perguntas ──────────────────────────────────────────────────────── */}
-      <section style={{ background: '#0a0f1a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+      <section style={{ background: '#06200f', borderTop: '1px solid rgba(110,231,165,0.10)' }}>
         <div className="max-w-3xl mx-auto px-5 py-16 md:py-20">
           <Revela>
             <h2 className="font-display text-center mb-10" style={{ fontSize: 'clamp(26px, 3.6vw, 40px)', color: '#f2f6f3' }}>
@@ -892,7 +899,7 @@ export default function Landing({ setView }) {
             {PERGUNTAS.map(({ q, a }, i) => (
               <Revela key={q} delay={i * 50}>
                 <details className="group rounded-xl p-5"
-                  style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.09)' }}>
+                  style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(110,231,165,0.13)' }}>
                   <summary className="font-semibold cursor-pointer list-none flex items-start justify-between gap-4"
                     style={{ color: '#f2f6f3' }}>
                     <span>{q}</span>
@@ -911,12 +918,12 @@ export default function Landing({ setView }) {
       <section className="max-w-6xl mx-auto px-5 py-16 md:py-20">
         <Revela>
           <div className="relative rounded-3xl px-6 py-12 sm:px-12 text-center overflow-hidden"
-            style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+            style={{ border: '1px solid rgba(110,231,165,0.14)' }}>
             <div className="absolute inset-0 pointer-events-none" aria-hidden="true"
               style={{
                 background:
-                  'radial-gradient(600px 300px at 50% 0%, rgba(0,133,66,0.4), transparent 65%),' +
-                  'radial-gradient(400px 240px at 85% 100%, rgba(255,215,0,0.1), transparent 60%)',
+                  'radial-gradient(700px 340px at 50% 0%, rgba(16,185,87,0.30), transparent 66%),' +
+                  'radial-gradient(460px 260px at 85% 100%, rgba(255,215,0,0.13), transparent 62%)',
               }} />
             <div className="relative">
               {/* Sem contadores aqui: o número de rodadas do campeonato inteiro não
@@ -950,7 +957,7 @@ export default function Landing({ setView }) {
       </section>
 
       {/* ── Rodapé ─────────────────────────────────────────────────────────── */}
-      <footer style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <footer style={{ borderTop: '1px solid rgba(110,231,165,0.12)' }}>
         <div className="max-w-6xl mx-auto px-5 py-10">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-5">
             <Marca compacto claro idSufixo="-rodape" />
