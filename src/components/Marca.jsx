@@ -53,16 +53,29 @@ export function Escudo({ size = 38, idSufixo = '' }) {
   );
 }
 
-// `claro` = vai sobre fundo escuro. O "BRASIL" muda de cor; o "BOLÃO" é sempre
-// dourado, que é a assinatura da marca.
-export function Marca({ compacto = false, claro = false, idSufixo = '' }) {
-  const tamanho = compacto ? '0.95rem' : '1.05rem';
+// Tamanhos nomeados em vez de números soltos: a marca precisa ser a MESMA em
+// toda tela, e "compacto/normal/grande" é o que evita cada tela escolher um
+// tamanho por conta e a identidade sair desalinhada.
+const TAMANHOS = {
+  compacto: { escudo: 32, texto: '0.95rem' },
+  normal:   { escudo: 38, texto: '1.05rem' },
+  grande:   { escudo: 54, texto: '1.5rem' },
+};
+
+// `claro` força a versão para fundo escuro. Serve para superfícies que são
+// escuras nos DOIS temas (a página de venda, por exemplo).
+//
+// Sem `claro`, as cores acompanham o tema pelas classes utilitárias. Era esse o
+// bug do print: a tela de entrar usava a versão de fundo claro, então no tema
+// escuro o "BRASIL" saía em cinza-chumbo sobre fundo quase preto — sumia.
+export function Marca({ compacto = false, tamanho, claro = false, idSufixo = '' }) {
+  const t = TAMANHOS[tamanho] || (compacto ? TAMANHOS.compacto : TAMANHOS.normal);
   return (
-    <span className="inline-flex items-center gap-2.5 min-w-0">
-      <Escudo size={compacto ? 32 : 38} idSufixo={idSufixo} />
-      <span className="font-display leading-none truncate" style={{ letterSpacing: '0.1em' }}>
-        <span style={{ color: claro ? '#cfe6d6' : '#1f2937', fontSize: tamanho }}>BRASIL</span>
-        <span style={{ color: claro ? '#FFD700' : '#f9a825', fontSize: tamanho }}>BOLÃO</span>
+    <span className="inline-flex items-center gap-3 min-w-0">
+      <Escudo size={t.escudo} idSufixo={idSufixo} />
+      <span className="font-display leading-none truncate" style={{ letterSpacing: '0.1em', fontSize: t.texto }}>
+        <span className={claro ? '' : 'text-noite-900'} style={claro ? { color: '#cfe6d6' } : undefined}>BRASIL</span>
+        <span className={claro ? '' : 'text-ouro-600 dark:text-ouro-500'} style={claro ? { color: '#FFD700' } : undefined}>BOLÃO</span>
       </span>
     </span>
   );

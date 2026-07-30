@@ -1,29 +1,25 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Loader2, ArrowRight, Search, ArrowLeft, LogIn } from 'lucide-react';
 import { loginWithWhatsapp } from './authService.js';
-import { ultimoBolaoVisitado, esquecerTenant } from './tenant.js';
+import { ultimoBolaoVisitado } from './tenant.js';
 import { Marca } from './components/Marca.jsx';
 import { CampoSenha } from './components/CampoSenha.jsx';
 import { EsqueciSenhaModal } from './components/EsqueciSenha.jsx';
 
-// Portaria do participante, em /entrar.
+// Página de login ÚNICA do sistema, em /entrar.
 //
-// A versão anterior colocava três caminhos com o MESMO peso — atalho do último
-// bolão, lista de bolões e "já tenho conta" — e escondia o formulário de login
-// atrás de um clique. Quem chega aqui já disse "já participo": o que essa
-// pessoa quer é entrar. Uma tela com três opções iguais e nenhuma ação óbvia
-// trava justamente quem tem menos familiaridade com internet.
+// Como todo participante é cadastrado pelo link do organizador, a conta dele já
+// nasce ligada a um bolão. Então o login não precisa perguntar nada além de
+// WhatsApp e senha: quem sabe para onde levar a pessoa é o sistema, pelo
+// vínculo dela (lastTenantId + membership). Uma tela só, igual para todos.
 //
-// Regras que segui, pensando em quem usa o celular só para WhatsApp:
-// - uma ação principal, visível, sem clique intermediário;
-// - vocabulário do dia a dia: "seu WhatsApp", "sua senha" — nada de "endereço
-//   do bolão" ou exemplo com barra e hífen, que parece código;
-// - campos e botão grandes, com o número formatado enquanto digita;
-// - a busca de bolão vira uma TELA à parte, e não mais um bloco competindo;
-// - erro que diz o que fazer, e não só o que deu errado.
+// Quem AINDA não tem cadastro é o único caso que precisa dizer de qual bolão
+// está falando — e é o que o bloco de baixo resolve, mandando para
+// /{bolao}?cadastro=1, que abre o cadastro já dentro do bolão certo.
 //
-// O cartão "quer organizar um bolão?" saiu daqui: essa oferta é da página
-// inicial, e aqui só disputava atenção com quem já é participante.
+// Tudo mora no MESMO cartão de propósito: a versão anterior espalhava atalho,
+// login e cadastro em três caixas empilhadas, e quem tem pouca intimidade com
+// internet lia três telas em vez de uma.
 
 const formataTelefone = (digitos) => {
   const d = String(digitos || '').replace(/\D/g, '').slice(0, 11);
@@ -33,30 +29,26 @@ const formataTelefone = (digitos) => {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 };
 
-// "bolao-do-ze" → "Bolao Do Ze". Só entra em cena se o bolão não estiver na
-// lista pública; ainda assim é bem mais legível que o endereço cru.
 const nomeLegivel = (slug) =>
   String(slug || '').split('-').filter(Boolean)
     .map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
 
-export default function Entrada({ setView }) {
+export default function Entrada() {
   const [whatsapp, setWhatsapp] = useState('');
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState('');
   const [entrando, setEntrando] = useState(false);
   const [esqueci, setEsqueci] = useState(false);
+  const [passo, setPasso] = useState('entrar');   // 'entrar' | 'procurar'
 
-  // Passo atual: 'entrar' (padrão) ou 'procurar'. Um de cada vez.
-  const [passo, setPasso] = useState('entrar');
-
-  const [ultimo, setUltimo] = useState(() => ultimoBolaoVisitado());
+  const [ultimo] = useState(() => ultimoBolaoVisitado());
   const [nomeDoUltimo, setNomeDoUltimo] = useState('');
 
   const [boloes, setBoloes] = useState(null);
   const [buscando, setBuscando] = useState(false);
   const [busca, setBusca] = useState('');
 
-  // Mostrar o nome de verdade do bolão, não o endereço com hífens: "bolao-lion-tech"
+  // O nome de verdade do bolão, não o endereço com hífens: "bolao-lion-tech"
   // não diz nada para quem só quer voltar para onde estava.
   useEffect(() => {
     if (!ultimo) return;
@@ -87,7 +79,6 @@ export default function Entrada({ setView }) {
     if (!boloes) return [];
     const t = busca.trim().toLowerCase();
     if (!t) return boloes;
-    // Compara sem acento: quem procura "bolao do ze" acha "Bolão do Zé".
     const limpa = (x) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     return boloes.filter(b => limpa(b.nome).includes(limpa(t)) || b.slug.includes(limpa(t)));
   }, [boloes, busca]);
@@ -99,6 +90,8 @@ export default function Entrada({ setView }) {
 
     setErro(''); setEntrando(true);
     try {
+      // Não escolhemos bolão aqui: o observador de autenticação leva a pessoa
+      // ao bolão em que ela está cadastrada.
       await loginWithWhatsapp(numero, senha);
     } catch {
       setErro('Número ou senha não conferem. Confira e tente de novo — ou toque em "Esqueci minha senha".');
@@ -107,15 +100,18 @@ export default function Entrada({ setView }) {
     }
   };
 
-  // ── Tela de procurar bolão ──────────────────────────────────────────────
+  const Cabecalho = () => (
+    <div className="flex justify-center mb-8">
+      <a href="/" aria-label="Página inicial"><Marca tamanho="grande" idSufixo="-entrada" /></a>
+    </div>
+  );
+
+  // ── Escolher o bolão (só para quem ainda não tem cadastro) ──────────────
   if (passo === 'procurar') {
     return (
       <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
         <div className="w-full max-w-md">
-          <div className="flex justify-center mb-8">
-            <a href="/" aria-label="Página inicial"><Marca idSufixo="-entrada" /></a>
-          </div>
-
+          <Cabecalho />
           <div className="bg-white rounded-2xl border shadow-modal p-7">
             <button onClick={() => setPasso('entrar')}
               className="inline-flex items-center gap-1.5 text-sm text-noite-500 hover:text-noite-800 mb-5">
@@ -126,7 +122,7 @@ export default function Entrada({ setView }) {
               QUAL É O SEU BOLÃO?
             </h1>
             <p className="text-sm text-noite-500 leading-relaxed mb-5">
-              Toque no bolão do seu grupo para se cadastrar e começar a jogar.
+              Toque no bolão do seu grupo para fazer o seu cadastro nele.
             </p>
 
             <input type="text" value={busca} onChange={(e) => setBusca(e.target.value)}
@@ -145,8 +141,11 @@ export default function Entrada({ setView }) {
                       : 'Nenhum bolão com esse nome.'}
                   </p>
                 )}
+                {/* ?cadastro=1 abre o formulário de cadastro já DENTRO do bolão
+                    escolhido — é assim que quem não veio pelo link do
+                    organizador informa de qual bolão está falando. */}
                 {filtrados.map(b => (
-                  <a key={b.slug} href={`/${b.slug}`}
+                  <a key={b.slug} href={`/${b.slug}?cadastro=1`}
                     className="flex items-center justify-between gap-3 px-4 py-4 hover:bg-gray-50 transition-colors">
                     <span className="font-medium text-noite-800">{b.nome}</span>
                     <ArrowRight size={18} className="text-campo-600 flex-shrink-0" />
@@ -168,35 +167,33 @@ export default function Entrada({ setView }) {
     );
   }
 
-  // ── Tela principal: entrar ──────────────────────────────────────────────
+  // ── Login (tela principal) ──────────────────────────────────────────────
   return (
     <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
       <div className="w-full max-w-md">
-        <div className="flex justify-center mb-8">
-          <a href="/" aria-label="Página inicial"><Marca idSufixo="-entrada" /></a>
-        </div>
-
-        {/* Atalho para quem já esteve num bolão: é o caminho mais curto e por
-            isso vem antes de tudo, com o NOME do bolão, não o endereço. */}
-        {ultimo && (
-          <a href={`/${ultimo}`}
-            className="flex items-center justify-between gap-3 bg-white rounded-2xl border-2 border-campo-600 p-4 mb-4 hover:bg-campo-50 dark:hover:bg-campo-600/10 transition-colors">
-            <div className="min-w-0">
-              <p className="text-xs text-noite-500 mb-0.5">Você já entrou aqui antes</p>
-              <p className="font-semibold text-noite-900 truncate">
-                {nomeDoUltimo || nomeLegivel(ultimo)}
-              </p>
-            </div>
-            <span className="v2-btn-primary px-5 py-2.5 text-sm flex-shrink-0">Abrir</span>
-          </a>
-        )}
+        <Cabecalho />
 
         <div className="bg-white rounded-2xl border shadow-modal p-7">
+          {/* Atalho de quem já esteve num bolão: dentro do mesmo cartão, no
+              topo, porque é o caminho mais curto para a maioria. */}
+          {ultimo && (
+            <a href={`/${ultimo}`}
+              className="flex items-center justify-between gap-3 rounded-xl border-2 border-campo-600 bg-campo-50 dark:bg-campo-600/10 p-3.5 mb-6 hover:bg-campo-100 dark:hover:bg-campo-600/20 transition-colors">
+              <div className="min-w-0">
+                <p className="text-xs text-noite-500 mb-0.5">Você já entrou aqui antes</p>
+                <p className="font-semibold text-noite-900 truncate">
+                  {nomeDoUltimo || nomeLegivel(ultimo)}
+                </p>
+              </div>
+              <span className="v2-btn-primary px-5 py-2.5 text-sm flex-shrink-0">Abrir</span>
+            </a>
+          )}
+
           <h1 className="font-display text-2xl text-noite-900 mb-2" style={{ letterSpacing: '0.03em' }}>
             ENTRAR NO SEU BOLÃO
           </h1>
           <p className="text-sm text-noite-500 mb-6">
-            Use o WhatsApp e a senha que você cadastrou.
+            Use o WhatsApp e a senha que você cadastrou. Nós te levamos direto ao seu bolão.
           </p>
 
           {erro && (
@@ -229,18 +226,19 @@ export default function Entrada({ setView }) {
               Esqueci minha senha
             </button>
           </div>
-        </div>
 
-        {/* Segundo caminho, claramente separado e em segundo plano. */}
-        <div className="mt-5 bg-white rounded-2xl border p-6 text-center">
-          <p className="font-semibold text-noite-900 mb-1">Ainda não tem cadastro?</p>
-          <p className="text-sm text-noite-500 leading-relaxed mb-4">
-            Para jogar, você precisa entrar no bolão do seu grupo. Se o organizador te
-            mandou um link, é só tocar nele. Se não tiver o link, procure aqui:
-          </p>
-          <button onClick={abrirLista} className="v2-btn-outline w-full py-3.5">
-            <Search size={18} /> Procurar o meu bolão
-          </button>
+          {/* Mesmo cartão, separado por uma linha: é o segundo caso, não uma
+              segunda tela. */}
+          <div className="mt-7 pt-6 border-t">
+            <p className="text-sm text-noite-600 text-center leading-relaxed mb-3">
+              <strong className="text-noite-900">Ainda não tem cadastro?</strong><br />
+              Se o organizador te mandou um link, é só tocar nele. Se não tiver o link,
+              escolha o seu bolão aqui:
+            </p>
+            <button onClick={abrirLista} className="v2-btn-outline w-full py-3.5">
+              <Search size={18} /> Escolher o meu bolão
+            </button>
+          </div>
         </div>
       </div>
 

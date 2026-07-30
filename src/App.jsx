@@ -937,30 +937,15 @@ const LoginScreen = ({ setView }) => {
                 </button>
               </div>
               <button onClick={() => { setShowRegister(true); setError(''); }} className="v2-btn-outline w-full py-3">
-                <UserPlus size={18} /> Criar conta de participante
+                <UserPlus size={18} /> Criar minha conta neste bolão
               </button>
             </div>
           </div>
 
-          {/* Caminho do organizador: é a porta de entrada comercial e não pode
-              competir de igual para igual com os botões de quem só vai palpitar. */}
-          <div className="mt-8 pt-7 border-t border-gray-100">
-            <div className="rounded-2xl border-2 border-ouro-500 bg-ouro-50 dark:bg-ouro-500/10 p-5">
-              <div className="flex items-center gap-2 mb-1.5">
-                <Trophy size={18} className="text-ouro-600" />
-                <h3 className="font-display text-lg text-noite-900" style={{ letterSpacing: '0.04em' }}>QUER ORGANIZAR UM BOLÃO?</h3>
-              </div>
-              <p className="text-noite-500 text-sm leading-relaxed mb-4">
-                Monte o seu, convide a galera e administre rodadas, pagamentos e resultados pelo painel do organizador.
-              </p>
-              {/* Cor literal, e não text-noite-900: o index.css força
-                  .dark .text-noite-900 para quase branco com !important, o que
-                  no dark mode deixaria texto branco sobre o dourado sólido. */}
-              <button onClick={() => setView('onboard')} className="w-full py-3 rounded-xl font-semibold text-[#0a0f1a] bg-ouro-500 hover:bg-ouro-400 shadow-button-ouro transition-colors inline-flex items-center justify-center gap-2">
-                <Trophy size={18} /> Criar meu bolão
-              </button>
-            </div>
-          </div>
+          {/* O cartão "quer organizar um bolão?" saiu daqui: quem abre o link
+              de um bolão foi convidado para JOGAR. A oferta para organizador
+              tem página própria (a raiz do site) e aqui só competia com a ação
+              de quem chegou para palpitar. */}
         </div>
       </div>
 

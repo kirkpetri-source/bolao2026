@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   ArrowRight, Check, X, Calendar, Smartphone, BarChart3, QrCode, MessageCircle,
   Share2, ShieldCheck, Wallet, Trophy, Store, DollarSign, Megaphone, Users, Lock,
-  Minus, Plus,
+  Minus, Plus, LogIn,
 } from 'lucide-react';
 import { Marca } from './components/Marca.jsx';
 import { TRIAL_DAYS, PRICE_CENTS, PROMO_PRICE_CENTS } from '../api/_shared/subscription.js';
@@ -524,15 +524,19 @@ export default function Landing({ setView }) {
         }}>
         <div className="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between gap-3">
           <Marca compacto claro idSufixo="-topo" />
-          <div className="flex items-center gap-1 sm:gap-2">
-            <a href="/entrar" className="px-3 py-2 text-sm rounded-lg transition-colors hover:text-[#FFD700] whitespace-nowrap"
-              style={{ color: '#cfe6d6' }}>
-              Já participo
+          <div className="flex items-center gap-2">
+            {/* "Já participo" é o caminho de QUEM JÁ JOGA — a maioria de quem
+                digita o endereço. Precisa saltar aos olhos, e por isso ganhou
+                caixa verde sólida em vez de um link discreto. */}
+            <a href="/entrar"
+              className="px-4 py-2 rounded-xl text-sm font-semibold transition-transform hover:-translate-y-0.5 whitespace-nowrap inline-flex items-center gap-1.5"
+              style={{ background: '#008542', color: '#ffffff', boxShadow: '0 8px 22px -12px rgba(0,133,66,.9)' }}>
+              <LogIn size={15} /> Já participo
             </a>
             <button onClick={criar}
-              className="px-4 py-2 rounded-xl text-sm font-semibold transition-transform hover:-translate-y-0.5 whitespace-nowrap"
+              className="px-4 py-2 rounded-xl text-sm font-semibold transition-transform hover:-translate-y-0.5 whitespace-nowrap hidden sm:inline-flex"
               style={{ background: '#FFD700', color: '#0a0f1a' }}>
-              Criar meu bolão
+              Administrar meu bolão
             </button>
           </div>
         </div>
@@ -580,17 +584,19 @@ export default function Landing({ setView }) {
               </Revela>
 
               <Revela delay={180}>
-                <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                {/* Um caminho só. O segundo botao ("Fazer a conta do meu
+                    bolao") era lido como "criar conta de usuario", e conta de
+                    participante NAO se cria aqui: ela nasce do link que o
+                    organizador manda. A calculadora continua logo abaixo. */}
+                <div className="mb-6">
                   <button onClick={criar}
-                    className="py-3.5 px-7 rounded-xl font-semibold inline-flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"
+                    className="py-4 px-8 rounded-xl font-semibold inline-flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5 w-full sm:w-auto"
                     style={{ background: '#FFD700', color: '#0a0f1a', boxShadow: '0 10px 30px -12px rgba(255,215,0,.55)' }}>
-                    Criar meu bolão <ArrowRight size={18} />
+                    Administrar meu próprio bolão <ArrowRight size={18} />
                   </button>
-                  <a href="#conta"
-                    className="py-3.5 px-7 rounded-xl font-semibold inline-flex items-center justify-center gap-2 transition-colors"
-                    style={{ border: '1px solid rgba(255,255,255,0.22)', color: '#e9eef2' }}>
-                    Fazer a conta do meu bolão
-                  </a>
+                  <p className="text-sm mt-3" style={{ color: '#9fb3a6' }}>
+                    Já joga em um bolão? <a href="/entrar" className="underline" style={{ color: '#6ee7a5' }}>Entre por aqui</a>.
+                  </p>
                 </div>
               </Revela>
 
@@ -930,7 +936,7 @@ export default function Landing({ setView }) {
                 <button onClick={criar}
                   className="py-3.5 px-7 rounded-xl font-semibold inline-flex items-center justify-center gap-2 transition-transform hover:-translate-y-0.5"
                   style={{ background: '#FFD700', color: '#0a0f1a', boxShadow: '0 10px 30px -12px rgba(255,215,0,.5)' }}>
-                  Criar meu bolão <ArrowRight size={18} />
+                  Administrar meu próprio bolão <ArrowRight size={18} />
                 </button>
                 <a href={linkWhatsapp} target="_blank" rel="noopener noreferrer"
                   className="py-3.5 px-7 rounded-xl font-semibold inline-flex items-center justify-center gap-2 transition-colors"
