@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>BrasilBolão — o bolão do Brasileirão sem planilha</title>
-    <meta name="description" content="Crie o bolão do Brasileirão, convide a galera por um link e deixe o sistema abrir as rodadas, apurar os placares, montar o ranking e cobrar as cartelas por PIX. 7 dias grátis, sem cartão." />
+    <title>BrasilBolão — o bolão do Brasileirão com a sua turma</title>
+    <meta name="description" content="Palpites pelo celular, ranking automático a cada rodada e cartelas por PIX direto com o organizador. Sem planilha e sem instalar nada." />
     <link rel="canonical" href="https://brasilbolao.com.br/" />
     <meta name="theme-color" content="#060912" />
 
@@ -13,17 +13,30 @@
          evita mais um arquivo só para o ícone da aba. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M24 2 41 7v18c0 10-7 17.5-17 21C14 42.5 7 35 7 25V7L24 2z' fill='%23008542' stroke='%23FFD700' stroke-width='2'/%3E%3Ccircle cx='24' cy='23' r='8.4' fill='none' stroke='%23FFD700' stroke-width='1.8'/%3E%3Cpath d='M24 15.2l4.6 3.4-1.8 5.5h-5.6l-1.8-5.5L24 15.2z' fill='%23FFD700'/%3E%3C/svg%3E" />
 
-    <!-- Prévia em WhatsApp e redes: o link da página de venda é compartilhado
-         em grupo, e sem estas tags aparece só a URL crua. -->
+    <!-- Prévia do link no WhatsApp.
+         Este cartão é a primeira impressão de quem recebe o convite do bolão,
+         muitas vezes antes de abrir qualquer coisa. Dois cuidados:
+         1. IMAGEM. Sem og:image o WhatsApp mostra um cartão só de texto, que
+            parece link duvidoso. A imagem fica em /public/preview.png e é
+            gerada por scripts/gerar-preview.py, para poder ser refeita.
+         2. TEXTO PARA QUEM RECEBE. A descrição antiga falava com o organizador
+            ("você cria o bolão em dois minutos"), mas quem recebe o link quase
+            sempre é participante — e lia uma promessa que não era para ele. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="BrasilBolão" />
     <meta property="og:locale" content="pt_BR" />
     <meta property="og:url" content="https://brasilbolao.com.br/" />
-    <meta property="og:title" content="BrasilBolão — o bolão do Brasileirão sem planilha" />
-    <meta property="og:description" content="Você cria o bolão em dois minutos e manda um link no grupo. O sistema cuida de rodadas, palpites, ranking e cobrança por PIX. 7 dias grátis, sem cartão." />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="BrasilBolão — o bolão do Brasileirão sem planilha" />
-    <meta name="twitter:description" content="Rodadas automáticas, palpites pelo celular, ranking na hora e cartelas por PIX na sua chave." />
+    <meta property="og:title" content="BrasilBolão — o bolão do Brasileirão com a sua turma" />
+    <meta property="og:description" content="Palpites pelo celular, ranking automático a cada rodada e cartelas por PIX direto com o organizador. Sem planilha e sem instalar nada." />
+    <meta property="og:image" content="https://brasilbolao.com.br/preview.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="BrasilBolão — o bolão do Brasileirão, do jeito fácil" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="BrasilBolão — o bolão do Brasileirão com a sua turma" />
+    <meta name="twitter:description" content="Palpites pelo celular, ranking automático a cada rodada e cartelas por PIX direto com o organizador." />
+    <meta name="twitter:image" content="https://brasilbolao.com.br/preview.png" />
   </head>
   <body>
     <div id="root"></div>
