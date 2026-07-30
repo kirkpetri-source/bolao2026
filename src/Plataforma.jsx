@@ -3,6 +3,7 @@ import { Trophy, LogOut, ShieldAlert, Loader2 } from 'lucide-react';
 import { useApp } from './AppContext.js';
 import { loginWithEmail } from './authService.js';
 import { PlataformaTab } from './AdminPanel.jsx';
+import { CampoSenha } from './components/CampoSenha.jsx';
 
 // Console da plataforma, em /plataforma.
 //
@@ -49,11 +50,7 @@ export default function Plataforma() {
                 <input type="email" autoComplete="username" value={email}
                   onChange={(e) => setEmail(e.target.value)} className="v2-input" />
               </div>
-              <div>
-                <label className="v2-label">Senha</label>
-                <input type="password" autoComplete="current-password" value={senha} onChange={(e) => setSenha(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && entrar()} className="v2-input" />
-              </div>
+              <CampoSenha rotulo="Senha" valor={senha} onChange={setSenha} onEnter={entrar} />
               <button onClick={entrar} disabled={entrando} className="v2-btn-primary w-full py-3 disabled:opacity-60">
                 {entrando && <Loader2 size={16} className="animate-spin" />} Entrar
               </button>

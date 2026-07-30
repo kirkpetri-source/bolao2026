@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, LogIn, Loader2, ArrowRight, Search } from 'lucide-react';
 import { loginWithWhatsapp } from './authService.js';
 import { ultimoBolaoVisitado, esquecerTenant } from './tenant.js';
+import { Marca } from './components/Marca.jsx';
+import { CampoSenha } from './components/CampoSenha.jsx';
 
 // Página da raiz do site.
 //
@@ -62,11 +64,10 @@ export default function Entrada({ setView }) {
   return (
     <div className="min-h-screen page-bg font-body flex items-center justify-center p-5">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-2.5 justify-center mb-8">
-          <div className="w-10 h-10 bg-campo-600 rounded-xl flex items-center justify-center">
-            <Trophy size={19} className="text-ouro-500" />
-          </div>
-          <span className="font-display text-noite-900 text-lg" style={{ letterSpacing: '0.18em' }}>BOLÃO BRASILEIRÃO</span>
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <a href="/" className="inline-flex" aria-label="Voltar para a página inicial">
+            <Marca idSufixo="-entrada" />
+          </a>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-modal p-7">
@@ -135,11 +136,7 @@ export default function Entrada({ setView }) {
                 <input type="tel" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value.replace(/\D/g, ''))}
                   placeholder="11999999999" className="v2-input" />
               </div>
-              <div>
-                <label className="v2-label">Senha</label>
-                <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && entrar()} className="v2-input" />
-              </div>
+              <CampoSenha rotulo="Senha" valor={senha} onChange={setSenha} onEnter={entrar} />
               <button onClick={entrar} disabled={entrando} className="v2-btn-primary w-full py-3 disabled:opacity-60">
                 {entrando && <Loader2 size={16} className="animate-spin" />} Entrar
               </button>

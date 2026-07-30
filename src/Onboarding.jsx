@@ -4,6 +4,8 @@ import { useApp } from './AppContext.js';
 import { DarkToggle } from './components/shared.jsx';
 import { loginWithWhatsapp, authErrorMessage } from './authService.js';
 import { rememberTenant, inviteUrl } from './tenant.js';
+import { CampoSenha } from './components/CampoSenha.jsx';
+import { validaSenha, MIN_SENHA } from '../api/_shared/senha.js';
 
 // Onboarding de organizador (Fase 3 do SaaS): cria a conta do dono + o tenant
 // (bolão) + configuração inicial via /api/tenants/create (Admin SDK), e entrega
@@ -12,7 +14,7 @@ const OnboardingScreen = ({ setView }) => {
   const { login } = useApp();
   const [form, setForm] = useState({
     bolaoName: '', name: '', whatsapp: '', email: '', password: '', confirmPassword: '',
-    pixKey: '', betValue: 15,
+    betValue: 15,
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -29,7 +31,8 @@ const OnboardingScreen = ({ setView }) => {
       setError('Informe um e-mail válido — é por ele que enviamos os avisos de cobrança.'); return;
     }
     if (form.password !== form.confirmPassword) { setError('Senhas diferentes!'); return; }
-    if (form.password.length < 6) { setError('Senha mínimo 6 caracteres!'); return; }
+    const checagem = validaSenha(form.password, { whatsapp: form.whatsapp, nome: form.name });
+    if (!checagem.ok) { setError(checagem.erro); return; }
     setError(''); setSaving(true);
     try {
       const res = await fetch('/api/tenants/create', {
@@ -41,7 +44,6 @@ const OnboardingScreen = ({ setView }) => {
           whatsapp: form.whatsapp,
           email: form.email.trim(),
           password: form.password,
-          pixKey: form.pixKey.trim(),
           betValue: Number(form.betValue) || 15,
         }),
       });
@@ -165,24 +167,20 @@ const OnboardingScreen = ({ setView }) => {
                   <p className="text-xs text-noite-400 mt-1">Usado só para os avisos de cobrança. O login continua sendo pelo WhatsApp.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="v2-label">Senha</label>
-                    <input type="password" placeholder="Mín. 6 caracteres" value={form.password} onChange={set('password')} className="v2-input" />
-                  </div>
-                  <div>
-                    <label className="v2-label">Confirmar</label>
-                    <input type="password" placeholder="Repita a senha" value={form.confirmPassword} onChange={set('confirmPassword')} className="v2-input" />
-                  </div>
+                  <CampoSenha rotulo="Senha" valor={form.password} medidor autoComplete="new-password"
+                    placeholder={`Mín. ${MIN_SENHA} caracteres`}
+                    onChange={(v) => setForm(f => ({ ...f, password: v }))} />
+                  <CampoSenha rotulo="Confirmar" valor={form.confirmPassword} autoComplete="new-password"
+                    placeholder="Repita a senha"
+                    onChange={(v) => setForm(f => ({ ...f, confirmPassword: v }))} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="v2-label">Chave PIX (opcional)</label>
-                    <input type="text" placeholder="Para receber as cartelas" value={form.pixKey} onChange={set('pixKey')} className="v2-input" />
-                  </div>
-                  <div>
-                    <label className="v2-label">Valor da cartela (R$)</label>
-                    <input type="number" min="1" value={form.betValue} onChange={set('betValue')} className="v2-input" />
-                  </div>
+                {/* A chave PIX saiu daqui: o assistente do primeiro acesso já a
+                    pede, com explicação do que ela faz. Pedir duas vezes fazia o
+                    organizador achar que tinha errado da primeira. */}
+                <div>
+                  <label className="v2-label">Valor da cartela (R$)</label>
+                  <input type="number" min="1" value={form.betValue} onChange={set('betValue')} className="v2-input" />
+                  <p className="text-xs text-noite-400 mt-1">Dá para mudar depois. A chave PIX você cadastra no primeiro acesso ao painel.</p>
                 </div>
                 <div className="pt-2 space-y-3">
                   <button onClick={handleCreate} disabled={saving} className="v2-btn-primary w-full py-3.5 text-base disabled:opacity-60">
