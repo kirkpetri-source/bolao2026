@@ -1,7 +1,9 @@
 import { db, getSettings, sendWhatsApp, sendWhatsAppDocument, formatPhone } from '../_shared/firebase.js';
 import { collection, getDocs, doc, updateDoc, query, where, serverTimestamp } from '../_shared/firestore.js';
 import { DEFAULT_TENANT_ID, listTenants, getUsersById, getTenantParticipants } from '../_shared/tenant.js';
-import { matchCountsForScoring } from '../_shared/matchStatus.js';
+import { matchCountsForScoring, podeFinalizarAutomaticamente } from '../_shared/matchStatus.js';
+import { rankingUrl } from '../_shared/appUrl.js';
+import { calcPoints } from '../_shared/scoring.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 // Tempo mínimo após o horário do jogo para considerá-lo encerrado automaticamente.
@@ -28,14 +30,6 @@ function isEffectivelyFinished(match) {
   return Date.now() - new Date(match.date).getTime() >= FINISH_AFTER_MS;
 }
 
-// Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
-function calcPoints(predHome, predAway, realHome, realAway) {
-  if (realHome == null || realAway == null) return 0;
-  if (predHome === realHome && predAway === realAway) return 3;
-  const pr = predHome > predAway ? 'H' : predHome < predAway ? 'A' : 'D';
-  const mr = realHome > realAway ? 'H' : realHome < realAway ? 'A' : 'D';
-  return pr === mr ? 1 : 0;
-}
 
 // Gera PDF do ranking em base64 para envio via EvolutionAPI (Node.js compatível)
 async function generateRankingPdf(roundName, ranking) {
@@ -316,6 +310,13 @@ async function processTenant(tenant, usersById, now, logs) {
     if (round.resultadoCalculado) continue;       // já processado
     if (!round.matches?.length) continue;
 
+    // Rodada com jogo manual é encerrada pelo organizador, no botão
+    // "Finalizar rodada": o placar desses jogos não vem de fonte nenhuma.
+    if (!podeFinalizarAutomaticamente(round)) {
+      logs.push(`${tag} ${round.name || `Rodada ${round.number}`}: tem jogo manual — aguardando o organizador finalizar.`);
+      continue;
+    }
+
     // Verificar se TODOS os jogos estão efetivamente encerrados
     const allDone = round.matches.every(isEffectivelyFinished);
     if (!allDone) continue;
@@ -335,8 +336,7 @@ async function processTenant(tenant, usersById, now, logs) {
       .sort((a, b) => (a.number || 0) - (b.number || 0))[0];
 
     // Link para o ranking da app (fallback se PDF falhar)
-    const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
-    const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
+    const rankingLink = rankingUrl(roundId);
 
     // Montar mensagem de resultado
     const winner = ranking[0];

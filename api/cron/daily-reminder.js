@@ -1,6 +1,7 @@
 import { db, getSettings, sendWhatsApp, formatPhone } from '../_shared/firebase.js';
 import { collection, getDocs, query, where, doc, updateDoc } from '../_shared/firestore.js';
 import { listTenants, getUsersById, getTenantParticipants } from '../_shared/tenant.js';
+import { tenantUrl } from '../_shared/appUrl.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -34,7 +35,9 @@ export default async function handler(req, res) {
 
       const settings = await getSettings(tenant.id);
       const GROUP_JID = (settings?.whatsapp?.groupJid || '').trim();
-      const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
+      // Link do BOLÃO, não da raiz: a raiz é porta de entrada e faria o
+      // participante escolher onde entrar antes de palpitar.
+      const linkDoBolao = tenantUrl(tenant.id);
       const brand = settings?.brandName || 'Bolão Brasileirão';
 
       const activeUsers = (await getTenantParticipants(tenant.id, usersById))
@@ -63,7 +66,7 @@ export default async function handler(req, res) {
           continue;
         }
 
-        const roundLink = appUrl ? `\n\n🔗 Acesse agora: ${appUrl}` : '';
+        const roundLink = `\n\n🔗 Acesse agora: ${linkDoBolao}`;
 
         // Mensagem para o grupo
         if (GROUP_JID) {

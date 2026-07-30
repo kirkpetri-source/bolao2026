@@ -37,7 +37,6 @@ export function pickPublicConfig(s) {
     termsOfUse: s.termsOfUse ?? '',
     systemPolicies: s.systemPolicies ?? '',
     limitsRestrictions: s.limitsRestrictions ?? '',
-    appUrl: s.appUrl ?? '',
     // Booleano em vez do appId secreto: o cliente só precisa saber se o Woovi está ativo.
     wooviEnabled: !!(s.woovi?.appId && String(s.woovi.appId).trim()),
     payment: {

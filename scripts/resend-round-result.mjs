@@ -10,6 +10,7 @@ import { getFirestore, collection, getDocs, doc, updateDoc, query, where, server
 import axios from 'axios';
 import https from 'https';
 import { jsPDF } from 'jspdf';
+import { baseUrl } from '../api/_shared/appUrl.js';
 
 const ROUND_ID = process.argv[2];
 if (!ROUND_ID) { console.error('Usage: node scripts/resend-round-result.mjs <roundId>'); process.exit(1); }
@@ -114,10 +115,10 @@ async function main() {
   const settings = settingsSnap.empty ? {} : settingsSnap.docs[0].data();
   const GROUP_JID = (settings?.whatsapp?.groupJid || '').trim();
   const ADMIN_PHONE = settings?.whatsapp?.number || '';
-  const appUrl = (settings?.appUrl || '').replace(/\/$/, '');
+  const appUrl = baseUrl();
 
   console.log(`  → Grupo JID: ${GROUP_JID || '(não configurado)'}`);
-  console.log(`  → App URL: ${appUrl || '(não configurada)'}`);
+  console.log(`  → App URL: ${appUrl}`);
 
   // Ler rodada
   const roundsSnap = await getDocs(collection(db, 'rounds'));

@@ -4,16 +4,10 @@ import {
   collection, getDocs, doc, updateDoc, query, where, serverTimestamp
 } from '../_shared/firestore.js';
 import { listTenants, getUsersById } from '../_shared/tenant.js';
-import { isMatchPostponed, matchCountsForScoring } from '../_shared/matchStatus.js';
+import { isMatchPostponed, matchCountsForScoring, isMatchSettled, podeFinalizarAutomaticamente } from '../_shared/matchStatus.js';
+import { rankingUrl } from '../_shared/appUrl.js';
+import { calcPoints } from '../_shared/scoring.js';
 
-// Calcula pontos de um palpite — exato=3pts, tendência=1pt (igual ao App.jsx)
-function calcPoints(predHome, predAway, realHome, realAway) {
-  if (realHome == null || realAway == null) return 0;
-  if (predHome === realHome && predAway === realAway) return 3;
-  const predResult = predHome > predAway ? 'H' : predHome < predAway ? 'A' : 'D';
-  const realResult = realHome > realAway ? 'H' : realHome < realAway ? 'A' : 'D';
-  return predResult === realResult ? 1 : 0;
-}
 
 async function generateRankingPdf(roundName, ranking) {
   try {
@@ -128,8 +122,7 @@ async function finalizeRound(roundId, roundData, settings, userNames) {
   const ranking = Object.values(cartelaPoints)
     .sort((a, b) => b.points - a.points);
 
-  const appUrl = (settings?.appUrl || process.env.APP_URL || '').replace(/\/$/, '');
-  const rankingLink = appUrl ? `${appUrl}/ranking/${roundId}` : null;
+  const rankingLink = rankingUrl(roundId);
 
   const target = groupJid || adminPhone;
   if (target) {
@@ -255,7 +248,14 @@ export default async function handler(req, res) {
 
           const homeScore = source.homeScore !== undefined ? source.homeScore : match.homeScore;
           const awayScore = source.awayScore !== undefined ? source.awayScore : match.awayScore;
-          const finished = source.finished ?? match.finished;
+          // A fonte às vezes manda o placar e NÃO vira o status para encerrado
+          // (visto na rodada 21: 1x1 com status "NS"). Quem confiasse só nela
+          // ficaria esperando para sempre. isMatchSettled já é a regra do resto
+          // do sistema: com placar, sem status de "em andamento" e passado o
+          // tempo máximo de uma partida, o jogo acabou.
+          const finishedDaFonte = source.finished ?? match.finished;
+          const finished = finishedDaFonte
+            || isMatchSettled({ ...match, homeScore, awayScore, matchStatus: source.matchStatus ?? match.matchStatus ?? null });
           // Propaga matchStatus para que bolao-engine possa detectar jogos ainda em andamento
           // (ex: 'ET' = prorrogação, 'P' = pênaltis, 'BT' = intervalo prorrogação)
           const matchStatus = source.matchStatus ?? match.matchStatus ?? null;
@@ -292,7 +292,11 @@ export default async function handler(req, res) {
           logs.push(`[DRY RUN] [${tenant.id}] Rodada ${roundNum}: placares ${scoresChanged ? 'teriam sido atualizados' : 'sem alteração'}`);
 
           // Adiado conta como resolvido: esperar placar dele travava a rodada.
-        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m));
+        // Rodada com jogo manual não é encerrada pela automação: o placar
+        // desses jogos só existe quando o organizador lança. Fechar sem eles
+        // publicaria um ranking incompleto como se fosse final.
+        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m))
+          && podeFinalizarAutomaticamente({ matches: updatedMatches });
           if (allDone && !round.resultadoCalculado) {
             // Simular cálculo de pontos para o relatório
             const predsSnap = await getDocs(query(collection(db, 'predictions'), where('roundId', '==', round.id)));
@@ -359,7 +363,11 @@ export default async function handler(req, res) {
         }
 
         // Adiado conta como resolvido: esperar placar dele travava a rodada.
-        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m));
+        // Rodada com jogo manual não é encerrada pela automação: o placar
+        // desses jogos só existe quando o organizador lança. Fechar sem eles
+        // publicaria um ranking incompleto como se fosse final.
+        const allDone = updatedMatches.every(m => m.finished || isMatchPostponed(m))
+          && podeFinalizarAutomaticamente({ matches: updatedMatches });
         if (allDone && !round.resultadoCalculado) {
           logs.push(`[${tenant.id}] Rodada ${roundNum}: todos os jogos terminaram — finalizando...`);
           await finalizeRound(round.id, { ...round, matches: updatedMatches }, settings, userNames);
