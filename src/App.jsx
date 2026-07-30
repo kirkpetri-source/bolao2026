@@ -10,6 +10,9 @@ import { resolveTenantId, rememberTenant, publicConfigDocId, DEFAULT_TENANT_ID, 
 import NovaVersao from './components/NovaVersao.jsx';
 import Plataforma from './Plataforma.jsx';
 import Entrada from './Entrada.jsx';
+import Landing from './Landing.jsx';
+import { CampoSenha } from './components/CampoSenha.jsx';
+import { validaSenha, MIN_SENHA } from '../api/_shared/senha.js';
 import OnboardingScreen from './Onboarding.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { AppContext, useApp } from './AppContext.js';
@@ -714,7 +717,11 @@ const LoginScreen = ({ setView }) => {
     }
     if (!reg.name || !reg.whatsapp || !reg.password) return setError('Preencha todos!');
     if (reg.password !== reg.confirmPassword) return setError('Senhas diferentes!');
-    if (reg.password.length < 6) return setError('Senha mínimo 6!');
+    // A regra é a mesma do servidor (api/_shared/senha.js): antes o único
+    // critério era o mínimo do Firebase, e o WhatsApp — que está no grupo —
+    // servia de senha para quem quisesse.
+    const checagem = validaSenha(reg.password, { whatsapp: reg.whatsapp, nome: reg.name });
+    if (!checagem.ok) return setError(checagem.erro);
     const phone = normalizeWhatsapp(reg.whatsapp);
     if (users.find(u => normalizeWhatsapp(u.whatsapp) === phone)) return setError('WhatsApp já cadastrado!');
     try {
@@ -796,14 +803,12 @@ const LoginScreen = ({ setView }) => {
                 <input type="tel" placeholder="11999999999" value={reg.whatsapp} onChange={(e) => setReg({ ...reg, whatsapp: e.target.value.replace(/\D/g, '') })} className="v2-input" />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="v2-label">Senha</label>
-                  <input type="password" placeholder="Mín. 6 caracteres" value={reg.password} onChange={(e) => setReg({ ...reg, password: e.target.value })} className="v2-input" />
-                </div>
-                <div>
-                  <label className="v2-label">Confirmar</label>
-                  <input type="password" placeholder="Repita a senha" value={reg.confirmPassword} onChange={(e) => setReg({ ...reg, confirmPassword: e.target.value })} className="v2-input" />
-                </div>
+                <CampoSenha rotulo="Senha" valor={reg.password} medidor autoComplete="new-password"
+                  placeholder={`Mín. ${MIN_SENHA} caracteres`}
+                  onChange={(v) => setReg({ ...reg, password: v })} />
+                <CampoSenha rotulo="Confirmar" valor={reg.confirmPassword} autoComplete="new-password"
+                  placeholder="Repita a senha"
+                  onChange={(v) => setReg({ ...reg, confirmPassword: v })} />
               </div>
               {establishments.length > 0 && (
                 <div>
@@ -1102,6 +1107,15 @@ function ehRotaDaPlataforma() {
   catch { return false; }
 }
 
+// A raiz virou página de venda, então a portaria do participante ganhou
+// endereço próprio: /entrar. É link, não estado interno, para poder ser mandado
+// no grupo ("entre em brasilbolao.com.br/entrar") e para o botão Voltar do
+// navegador fazer o que a pessoa espera.
+function ehRotaDeEntrada() {
+  try { return window.location.pathname.replace(/\/+$/, '').toLowerCase() === '/entrar'; }
+  catch { return false; }
+}
+
 function App() {
   const { currentUser, loading, settings, tenantId, bolaoInexistente } = useApp();
   const [view, setView] = useState('login');
@@ -1161,10 +1175,14 @@ function App() {
 
   if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
 
-  // Sem bolão na URL nem no histórico: a raiz não cadastra ninguém. Isso
-  // impedia que quem digitasse só o endereço do site fosse parar no bolão de
-  // teste da plataforma, que não tem organizador para cobrar nem premiar.
-  if (!tenantId && !currentUser) return <Entrada setView={setView} />;
+  // Sem bolão na URL: a raiz não cadastra ninguém em bolão nenhum. Ela vende o
+  // sistema para quem quer ORGANIZAR — é quem paga a mensalidade. Quem chegou
+  // para palpitar segue em /entrar, que é a portaria de sempre.
+  if (!tenantId && !currentUser) {
+    return ehRotaDeEntrada()
+      ? <Entrada setView={setView} />
+      : <Landing setView={setView} />;
+  }
 
   // Logado e ainda sem bolão resolvido: o observador de autenticação está
   // buscando o bolão da pessoa. Sem esta espera, o painel piscaria vazio.

@@ -40,6 +40,36 @@ export function isMatchSettled(match, agora = Date.now()) {
   return agora - new Date(match.date).getTime() >= 170 * 60 * 1000;
 }
 
+// ─── Jogo manual ──────────────────────────────────────────────────────────────
+// Jogo criado à mão pelo organizador (campeonato amador, amistoso, jogo que a
+// fonte não tem). Ele NUNCA vai receber placar da API: o organizador é a fonte.
+//
+// Marcamos explicitamente em vez de deduzir por "não tem apiEventId": dedução
+// erraria para o lado perigoso, tratando um jogo oficial com dado incompleto
+// como manual e travando a rodada inteira à espera de um placar que a automação
+// já traria.
+export function isMatchManual(match) {
+  return match?.manual === true;
+}
+
+export function temJogoManual(matches = []) {
+  return matches.some(isMatchManual);
+}
+
+// Jogo manual sem placar é o que segura a apuração. Jogo manual adiado não
+// segura — vale a mesma regra dos outros: adiado sai da conta.
+export function jogosManuaisPendentes(matches = []) {
+  return matches.filter(m => isMatchManual(m) && !isMatchPostponed(m)
+    && (m.homeScore == null || m.awayScore == null));
+}
+
+// A automação pode encerrar esta rodada sozinha? Só se ninguém depender do
+// organizador. Com jogo manual, quem fecha é ele, no botão "Finalizar rodada" —
+// senão o cron apuraria a rodada sem o resultado que só ele tem.
+export function podeFinalizarAutomaticamente(round) {
+  return !temJogoManual(round?.matches || []);
+}
+
 // Quantos jogos da rodada realmente valem. Serve para a tela dizer "16 de 20
 // jogos valendo" em vez de deixar o organizador contar na mão.
 export function resumoDaRodada(matches = []) {

@@ -5,7 +5,10 @@ import { db } from './firebase.js';
 import { useApp } from './AppContext.js';
 import { RulesCard, DarkToggle } from './components/shared.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
-import { isMatchPostponed, resumoDaRodada } from '../api/_shared/matchStatus.js';
+import { isMatchPostponed, resumoDaRodada, matchCountsForScoring, isMatchSettled, isMatchManual, jogosManuaisPendentes } from '../api/_shared/matchStatus.js';
+import { calcPoints } from '../api/_shared/scoring.js';
+import { CampoSenha } from './components/CampoSenha.jsx';
+import { validaSenha, MIN_SENHA } from '../api/_shared/senha.js';
 import { changeMyPassword, authErrorMessage } from './authService.js';
 import { isBlocked } from '../api/_shared/subscription.js';
 
@@ -191,21 +194,17 @@ const UserPanel = ({ setView }) => {
         return;
       }
       
+      // Conta assim que o placar existe — NÃO espera o campo `finished` da
+      // fonte. Era essa a causa do ranking parado: a mesma tela mostrava
+      // "Final: 1x1" (isMatchEffectivelyFinished) e somava zero ponto, porque a
+      // TheSportsDB tinha mandado o placar sem virar o status para encerrado.
+      // O painel do organizador já contava assim; só o participante ficava para
+      // trás, o que fazia os dois verem rankings diferentes.
       let points = 0;
       round.matches?.forEach(match => {
         const pred = cartela.predictions.find(p => p.matchId === match.id);
-        
-        if (pred && match.finished && match.homeScore !== null && match.awayScore !== null) {
-          if (pred.homeScore === match.homeScore && pred.awayScore === match.awayScore) {
-            points += 3;
-          } else {
-            const predResult = pred.homeScore > pred.awayScore ? 'home' : pred.homeScore < pred.awayScore ? 'away' : 'draw';
-            const matchResult = match.homeScore > match.awayScore ? 'home' : match.homeScore < match.awayScore ? 'away' : 'draw';
-            if (predResult === matchResult) {
-              points += 1;
-            }
-          }
-        }
+        if (!pred || !matchCountsForScoring(match)) return;
+        points += calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
       });
       cartelaPoints[cartela.code] = points;
     });
@@ -343,6 +342,25 @@ const UserPanel = ({ setView }) => {
 
         {isExpanded && (
           <div className="border-t p-6" style={{ backgroundColor: 'var(--bg-raised)' }}>
+            {/* Jogo manual não recebe placar automático. Sem este aviso, o
+                participante vê a rodada encerrada, o ranking parado e conclui
+                que o sistema falhou — quando na verdade falta o organizador
+                lançar um resultado que só ele tem. */}
+            {jogosManuaisPendentes(round.matches || []).length > 0 && (
+              <div className="mb-5 rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-500/10 p-4">
+                <p className="font-semibold text-amber-900 dark:text-amber-200 mb-1">
+                  {jogosManuaisPendentes(round.matches || []).length === 1
+                    ? 'Um jogo desta rodada aguarda o organizador'
+                    : `${jogosManuaisPendentes(round.matches || []).length} jogos desta rodada aguardam o organizador`}
+                </p>
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  São jogos lançados manualmente, que não têm placar automático. O
+                  ranking final desta rodada sai quando o organizador informar esses
+                  resultados.
+                </p>
+              </div>
+            )}
+
             {canPredictNoExisting && (
               <div className="text-center py-8">
                 <Target className="mx-auto text-orange-500 mb-3" size={48} />
@@ -1339,23 +1357,13 @@ const UserPanel = ({ setView }) => {
       const isPaid = cartelaPreds[0]?.paid;
       if (!isPaid) return 0;
       
+      // Regra e escala vêm de api/_shared/scoring.js e matchStatus.js: painel,
+      // participante, crons e página pública precisam somar igual.
       let points = 0;
       round.matches?.forEach(match => {
         const pred = cartelaPreds.find(p => p.matchId === match.id);
-        
-        // Conta pontos se houver placar disponível — inclusive parcial (jogo em andamento).
-        // Para rodadas finalizadas, todos os matches têm finished=true, sem diferença.
-        if (pred && match.homeScore !== null && match.awayScore !== null) {
-          if (pred.homeScore === match.homeScore && pred.awayScore === match.awayScore) {
-            points += 3;
-          } else {
-            const predResult = pred.homeScore > pred.awayScore ? 'home' : pred.homeScore < pred.awayScore ? 'away' : 'draw';
-            const matchResult = match.homeScore > match.awayScore ? 'home' : match.homeScore < match.awayScore ? 'away' : 'draw';
-            if (predResult === matchResult) {
-              points += 1;
-            }
-          }
-        }
+        if (!pred || !matchCountsForScoring(match)) return;
+        points += calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
       });
       return points;
     }
@@ -2435,13 +2443,13 @@ const ChangeMyPasswordModal = ({ onClose }) => {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [show, setShow] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const handleSave = async () => {
     if (!current) { setError('Informe a senha atual'); return; }
-    if (next.length < 6) { setError('A nova senha deve ter no mínimo 6 caracteres'); return; }
+    const checagem = validaSenha(next);
+    if (!checagem.ok) { setError(checagem.erro); return; }
     if (next !== confirm) { setError('A confirmação não confere'); return; }
     setError(''); setSaving(true);
     try {
@@ -2466,21 +2474,15 @@ const ChangeMyPasswordModal = ({ onClose }) => {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
         </div>
         <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Senha atual</label>
-            <input type={show ? 'text' : 'password'} value={current} onChange={(e) => setCurrent(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="Sua senha atual (ou a temporária)" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Nova senha</label>
-            <input type={show ? 'text' : 'password'} value={next} onChange={(e) => setNext(e.target.value)} className="w-full px-4 py-2 border rounded-lg" placeholder="Mínimo 6 caracteres" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Confirmar nova senha</label>
-            <input type={show ? 'text' : 'password'} value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSave()} className="w-full px-4 py-2 border rounded-lg" placeholder="Repita a nova senha" />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-gray-600">
-            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar senhas
-          </label>
+          <CampoSenha rotulo="Senha atual" valor={current} onChange={setCurrent}
+            className="w-full px-4 py-2 border rounded-lg" autoComplete="current-password"
+            placeholder="Sua senha atual (ou a temporária)" />
+          <CampoSenha rotulo="Nova senha" valor={next} onChange={setNext} medidor
+            className="w-full px-4 py-2 border rounded-lg" autoComplete="new-password"
+            placeholder={`Mínimo ${MIN_SENHA} caracteres`} />
+          <CampoSenha rotulo="Confirmar nova senha" valor={confirm} onChange={setConfirm}
+            className="w-full px-4 py-2 border rounded-lg" autoComplete="new-password"
+            onEnter={handleSave} placeholder="Repita a nova senha" />
           {error && <p className="text-red-600 text-sm">{error}</p>}
         </div>
         <div className="p-6 border-t flex gap-3">

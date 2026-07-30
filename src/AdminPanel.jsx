@@ -11,9 +11,16 @@ import GuidedTour from './components/GuidedTour.jsx';
 import { generateCartelaCode, fmtBRL, sortMatchesByDate, MATCH_FINISH_AFTER_MS, MATCH_IN_PROGRESS_STATUSES, isMatchEffectivelyFinished, getSafeLogo, markdownToHtml } from './utils/helpers.js';
 import { MESSAGE_TEMPLATES, TEMPLATE_CATEGORIES, buildTemplateText as buildTemplateTextUtil, validateMessageTags, normalizeTags, compileTemplate } from './utils/messageTemplates.js';
 import { getIdToken, authErrorMessage } from './authService.js';
-import { isMatchPostponed, resumoDaRodada } from '../api/_shared/matchStatus.js';
+import {
+  isMatchPostponed, resumoDaRodada, matchCountsForScoring,
+  isMatchManual, temJogoManual, jogosManuaisPendentes,
+} from '../api/_shared/matchStatus.js';
+import { calcPoints } from '../api/_shared/scoring.js';
+import { CampoSenha } from './components/CampoSenha.jsx';
+import { validaSenha, MIN_SENHA } from '../api/_shared/senha.js';
 import { inviteUrl, inviteMessage } from './tenant.js';
 import { STATUS, evaluateStatus, accessEndsAt, daysUntil } from '../api/_shared/subscription.js';
+import { rateio, percentuaisDe, PADRAO_ESTABELECIMENTO_PCT } from '../api/_shared/rateio.js';
 
 // Baixa automática das cartelas. Sem isso o organizador confere comprovante a
 // comprovante no WhatsApp e marca cada um na mão — o que não escala e é onde
@@ -62,7 +69,7 @@ const RecebimentoAutomaticoCard = () => {
       <p className="text-sm text-gray-600 mb-4">
         Hoje o participante paga no seu PIX e você confere o comprovante para dar baixa.
         Conectando uma conta Woovi, o sistema gera o QR Code do PIX, identifica o pagamento
-        e <strong>dá baixa sozinho</strong> — é o mesmo funcionamento do bolão principal.
+        e <strong>dá baixa sozinho</strong>, sem você conferir comprovante.
       </p>
 
       {ativo ? (
@@ -1097,14 +1104,19 @@ const WhatsAppConnectCard = () => {
 
               {/* Escolha do método. No celular o QR é inútil: não dá para o
                   próprio aparelho escanear a tela dele mesmo. */}
+              {/* Estes dois botões ESCOLHEM o método; quem conecta é o botão
+                  de baixo. O rótulo antigo ("Ler QR Code") parecia a ação em si,
+                  então o organizador clicava, não acontecia nada visível e ele
+                  concluía que estava quebrado. */}
+              <p className="text-xs font-medium text-gray-500 mb-2">Como você vai conectar:</p>
               <div className="flex gap-2 mb-4">
                 <button onClick={() => setModoCodigo(false)}
                   className={`px-3 py-2 rounded-lg text-sm border ${!modoCodigo ? 'border-green-600 text-green-700 font-semibold' : 'text-gray-500'}`}>
-                  Ler QR Code
+                  Tenho outro aparelho
                 </button>
                 <button onClick={() => setModoCodigo(true)}
                   className={`px-3 py-2 rounded-lg text-sm border ${modoCodigo ? 'border-green-600 text-green-700 font-semibold' : 'text-gray-500'}`}>
-                  Estou no celular
+                  Estou no celular do bolão
                 </button>
               </div>
 
@@ -1120,8 +1132,9 @@ const WhatsAppConnectCard = () => {
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 mb-4">
-                  Você precisa de outro aparelho para escanear. Se estiver no celular do bolão,
-                  use a opção <strong>Estou no celular</strong>.
+                  Vamos gerar um QR Code na tela para você escanear com o celular do bolão.
+                  Se você já está NO celular do bolão, use a outra opção — não dá para o
+                  aparelho escanear a própria tela.
                 </p>
               )}
 
@@ -1192,8 +1205,11 @@ const TeamForm = ({ team, onSave, onCancel }) => {
   const isProtected = team?.id ? rounds?.some(r => protectedStatuses.has(r?.status) && Array.isArray(r?.matches) && r.matches.some(m => m.homeTeamId === team.id || m.awayTeamId === team.id)) : false;
 
   const handleSave = () => {
-    if (!formData.name || !formData.logo) {
-      alert('Preencha todos os campos!');
+    // Escudo é OPCIONAL. Exigi-lo travava o caso mais comum de campeonato
+    // amador: o time do bairro não tem logo, e o organizador ficava sem
+    // cadastrar. Sem escudo, getSafeLogo gera um avatar com as iniciais.
+    if (!formData.name?.trim()) {
+      alert('Informe o nome do time.');
       return;
     }
     const exists = teams?.some(t => normalizeName(t.name) === normalizeName(formData.name) && (!team || t.id !== team.id));
@@ -1218,7 +1234,12 @@ const TeamForm = ({ team, onSave, onCancel }) => {
             {isProtected && (<p className="text-xs text-amber-600 mt-1">Nome bloqueado: time vinculado a rodadas ativas/fechadas/finalizadas.</p>)}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-2">Logo</label>
+            <label className="block text-sm font-medium mb-2">
+              Escudo <span className="text-gray-400 font-normal">(opcional)</span>
+            </label>
+            <p className="text-xs text-gray-400 mb-3">
+              Sem escudo, o time aparece com as iniciais do nome — útil para campeonato amador.
+            </p>
             <div className="flex gap-2 mb-3">
               <button onClick={() => setFormData({ ...formData, logoType: 'url' })} className={`flex-1 py-2 px-4 rounded-lg border ${formData.logoType === 'url' ? 'bg-green-600 text-white' : 'bg-white'}`}>
                 <ExternalLink size={16} className="inline mr-2" /> URL
@@ -1295,7 +1316,10 @@ const RoundForm = ({ round, teams, rounds, onSave, onCancel }) => {
   const addMatch = () => {
     setFormData({
       ...formData,
-      matches: [...(formData.matches || []), { id: Date.now(), homeTeamId: teams[0]?.id, awayTeamId: teams[1]?.id, date: '', homeScore: null, awayScore: null, finished: false }]
+      // `manual: true` é o que diz ao sistema que o placar deste jogo nunca vem
+      // da API — quem lança é o organizador, e por isso a rodada passa a
+      // depender dele para ser finalizada.
+      matches: [...(formData.matches || []), { id: Date.now(), homeTeamId: teams[0]?.id, awayTeamId: teams[1]?.id, date: '', homeScore: null, awayScore: null, finished: false, manual: true }]
     });
   };
 
@@ -1310,13 +1334,31 @@ const RoundForm = ({ round, teams, rounds, onSave, onCancel }) => {
     setFormData({ ...formData, matches: formData.matches.filter(m => m.id !== matchId) });
   };
 
+  const temManualNoForm = temJogoManual(formData.matches || []);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b sticky top-0 bg-white">
-          <h3 className="text-2xl font-bold">{round ? 'Editar Rodada' : 'Nova Rodada'}</h3>
+          <h3 className="text-2xl font-bold">{round ? 'Editar Rodada' : 'Adicionar rodada manual'}</h3>
         </div>
         <div className="p-6 space-y-6">
+          {/* O organizador precisa saber ANTES de montar a rodada que ela sai
+              da automação. Descobrir isso depois, com a rodada parada
+              esperando um placar que nunca chega, é o pior momento. */}
+          {temManualNoForm && (
+            <div className="rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-500/10 p-4">
+              <p className="font-semibold text-amber-900 dark:text-amber-200 mb-1">
+                Esta rodada tem jogo manual
+              </p>
+              <ul className="text-sm text-amber-800 dark:text-amber-200 space-y-1 list-disc list-inside">
+                <li>Os jogos que você criou aqui <strong>não recebem placar da tabela oficial</strong> — o resultado é você quem lança.</li>
+                <li>Os jogos vindos da tabela oficial continuam atualizando sozinhos, normalmente.</li>
+                <li>A rodada <strong>não encerra sozinha</strong>: depois de lançar os placares dos jogos manuais, use o botão <strong>Finalizar</strong> na lista de rodadas para apurar e publicar o ranking.</li>
+                <li>Os participantes veem um aviso de que há jogos aguardando o seu lançamento.</li>
+              </ul>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2">Número</label>
@@ -1455,10 +1497,8 @@ const PasswordModal = ({ user, onSave, onCancel }) => {
   const [error, setError] = useState('');
 
   const handleSave = () => {
-    if (!newPassword || newPassword.length < 6) {
-      setError('Senha deve ter no mínimo 6 caracteres!');
-      return;
-    }
+    const checagem = validaSenha(newPassword);
+    if (!checagem.ok) { setError(checagem.erro); return; }
     if (newPassword !== confirmPassword) {
       setError('Senhas não coincidem!');
       return;
@@ -1484,34 +1524,12 @@ const PasswordModal = ({ user, onSave, onCancel }) => {
             </p>
           </div>
           {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>}
-          <div>
-            <label className="block text-sm font-medium mb-2">Nova Senha</label>
-            <div className="relative">
-              <input 
-                type={showPassword ? 'text' : 'password'} 
-                value={newPassword} 
-                onChange={(e) => setNewPassword(e.target.value)} 
-                className="w-full px-4 py-2 border rounded-lg" 
-                placeholder="Mínimo 6 caracteres" 
-              />
-              <button 
-                onClick={() => setShowPassword(!showPassword)} 
-                className="absolute right-3 top-1/2 transform -translate-y-1/2"
-              >
-                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Confirmar Senha</label>
-            <input 
-              type={showPassword ? 'text' : 'password'} 
-              value={confirmPassword} 
-              onChange={(e) => setConfirmPassword(e.target.value)} 
-              className="w-full px-4 py-2 border rounded-lg" 
-              placeholder="Digite novamente" 
-            />
-          </div>
+          <CampoSenha rotulo="Nova Senha" valor={newPassword} onChange={setNewPassword} medidor
+            className="w-full px-4 py-2 border rounded-lg" autoComplete="new-password"
+            placeholder={`Mínimo ${MIN_SENHA} caracteres`} />
+          <CampoSenha rotulo="Confirmar Senha" valor={confirmPassword} onChange={setConfirmPassword}
+            className="w-full px-4 py-2 border rounded-lg" autoComplete="new-password"
+            onEnter={handleSave} placeholder="Digite novamente" />
         </div>
         <div className="p-6 border-t flex gap-3">
           <button onClick={onCancel} className="flex-1 px-6 py-2 border rounded-lg">Cancelar</button>
@@ -1681,7 +1699,9 @@ const AdminPanel = ({ setView }) => {
   const [showWooviSecret, setShowWooviSecret] = useState(false);
   const [footballApiKey, setFootballApiKey] = useState(settings?.footballApi?.key || '');
   const [whatsappGroupJid, setWhatsappGroupJid] = useState(settings?.whatsapp?.groupJid || '');
-  const [appUrl, setAppUrl] = useState(settings?.appUrl || (typeof window !== 'undefined' ? window.location.origin : ''));
+  // O endereço público do sistema saiu daqui: é o mesmo para todos os bolões e
+  // agora vem da env APP_URL (api/_shared/appUrl.js). Enquanto era um campo, o
+  // valor antigo ficava gravado e vencia a env, mandando link do domínio velho.
   const [syncRoundsLoading, setSyncRoundsLoading] = useState(false);
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [dryRunResult, setDryRunResult] = useState(null);
@@ -1996,21 +2016,23 @@ const AdminPanel = ({ setView }) => {
     const allPaidCount = allParticipants.filter(p => p.paid).length;
     const totalReceivedAll = allPaidCount * betValue;
     
-    // Premiação e Admin são sobre o TOTAL
-    const prizePool = totalReceivedAll * 0.85;
-    const adminFee = totalReceivedAll * 0.10;
+    // Premiação e Admin são sobre o TOTAL. Os percentuais são os que o
+    // organizador escolheu em Configurações — antes o cálculo ignorava a
+    // escolha dele e usava 85/10/5 fixos.
+    const pcts = percentuaisDe(settings);
+    const { premio: prizePool, administracao: adminFee } = rateio(totalReceivedAll, pcts);
     
     // Comissão do estabelecimento: 5% APENAS dos palpites vinculados a ele
     let establishmentFee = 0;
     if (filterEstablishmentId && filterEstablishmentId !== 'all' && filterEstablishmentId !== 'none') {
       // Se filtrou um estabelecimento específico, mostrar só a comissão dele
       const estParticipants = allParticipants.filter(p => p.establishmentId === filterEstablishmentId && p.paid);
-      establishmentFee = estParticipants.length * betValue * 0.05;
+      establishmentFee = estParticipants.length * betValue * (pcts.estabelecimentoPct / 100);
     } else {
       // Se não filtrou ou filtrou "todos", somar comissões de TODOS os estabelecimentos
       const paidParticipants = allParticipants.filter(p => p.paid);
       establishmentFee = paidParticipants.reduce((sum, p) => {
-        return p.establishmentId ? sum + (betValue * 0.05) : sum;
+        return p.establishmentId ? sum + (betValue * (pcts.estabelecimentoPct / 100)) : sum;
       }, 0);
     }
 
@@ -2048,15 +2070,15 @@ const AdminPanel = ({ setView }) => {
       totalPending += summary.totalPending;
     });
 
-    const prizePool = totalReceived * 0.85;
-    const adminFee = totalReceived * 0.10;
-    
+    const pcts = percentuaisDe(settings);
+    const { premio: prizePool, administracao: adminFee } = rateio(totalReceived, pcts);
+
     // Calcular comissão total somando todas as rodadas
     let establishmentFee = 0;
     finishedAndClosedRounds.forEach(round => {
       const participants = getRoundParticipants(round.id).filter(p => p.paid);
       establishmentFee += participants.reduce((sum, p) => {
-        return p.establishmentId ? sum + (betValue * 0.05) : sum;
+        return p.establishmentId ? sum + (betValue * (pcts.estabelecimentoPct / 100)) : sum;
       }, 0);
     });
 
@@ -2094,12 +2116,12 @@ const AdminPanel = ({ setView }) => {
     const paidParticipations = participants.filter(p => p.paid);
     
     const totalPaid = paidParticipations.length * betValue;
-    const prizePool = totalPaid * 0.85;
-    const adminFee = totalPaid * 0.10;
-    
+    const pcts = percentuaisDe(settings);
+    const { premio: prizePool, administracao: adminFee } = rateio(totalPaid, pcts);
+
     // Calcular comissão total dos estabelecimentos (soma individual)
     const establishmentFee = paidParticipations.reduce((sum, p) => {
-      return p.establishmentId ? sum + (betValue * 0.05) : sum;
+      return p.establishmentId ? sum + (betValue * (pcts.estabelecimentoPct / 100)) : sum;
     }, 0);
 
     const ranking = paidParticipations.map(participant => {
@@ -2154,23 +2176,13 @@ const AdminPanel = ({ setView }) => {
       const isPaid = cartelaPreds[0]?.paid;
       if (!isPaid) return 0;
       
+      // Regra e escala vêm de api/_shared/scoring.js e matchStatus.js: painel,
+      // participante, crons e página pública precisam somar igual.
       let points = 0;
       round.matches?.forEach(match => {
         const pred = cartelaPreds.find(p => p.matchId === match.id);
-        
-        // Conta pontos se houver placar disponível — inclusive parcial (jogo em andamento).
-        // Para rodadas finalizadas, todos os matches têm finished=true, sem diferença.
-        if (pred && match.homeScore !== null && match.awayScore !== null) {
-          if (pred.homeScore === match.homeScore && pred.awayScore === match.awayScore) {
-            points += 3;
-          } else {
-            const predResult = pred.homeScore > pred.awayScore ? 'home' : pred.homeScore < pred.awayScore ? 'away' : 'draw';
-            const matchResult = match.homeScore > match.awayScore ? 'home' : match.homeScore < match.awayScore ? 'away' : 'draw';
-            if (predResult === matchResult) {
-              points += 1;
-            }
-          }
-        }
+        if (!pred || !matchCountsForScoring(match)) return;
+        points += calcPoints(pred.homeScore, pred.awayScore, match.homeScore, match.awayScore);
       });
       return points;
     }
@@ -2651,7 +2663,6 @@ const AdminPanel = ({ setView }) => {
         whatsappMessage: whatsappMessage,
         betValue: parseFloat(betValue),
         chargeMessageTemplate: chargeMessageTemplate,
-        appUrl: (appUrl || '').trim(),
         devolution: {
           link: devolutionLink,
           instanceName: devolutionInstance,
@@ -3939,6 +3950,26 @@ const AdminPanel = ({ setView }) => {
   const changeStatus = async (id, newStatus) => {
     const round = rounds.find(r => r.id === id);
     if (round) {
+      // Finalizar é o ato que publica o ranking e define o prêmio. Com jogo
+      // manual sem placar, o ranking sairia errado e já divulgado — e desfazer
+      // resultado anunciado no grupo é o pior tipo de correção.
+      if (newStatus === 'finished') {
+        const pendentes = jogosManuaisPendentes(round.matches || []);
+        if (pendentes.length) {
+          const lista = pendentes
+            .map(m => {
+              const casa = teams.find(t => t.id === m.homeTeamId)?.name || m.homeTeamName || 'Time';
+              const fora = teams.find(t => t.id === m.awayTeamId)?.name || m.awayTeamName || 'Time';
+              return `• ${casa} x ${fora}`;
+            })
+            .join('\n');
+          alert(
+            `Faltam os placares dos jogos manuais desta rodada:\n\n${lista}\n\n` +
+            'Abra "Editar" na rodada, lance os resultados e finalize de novo.'
+          );
+          return;
+        }
+      }
       // Ao retornar para 'closed', resetar flags de finalização para o cron reprocessar
       const extraFields = newStatus === 'closed'
         ? { resultadoCalculado: false, resultSentToGroup: false }
@@ -4621,17 +4652,55 @@ const AdminPanel = ({ setView }) => {
           <div>
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
               <div>
-                <h2 className="text-2xl font-bold">Estabelecimentos/Indicadores</h2>
-                <p className="text-gray-600 mt-1">Gerenciar locais que indicam participantes • Comissão: 5%</p>
+                <h2 className="text-2xl font-bold">Pontos de venda</h2>
+                <p className="text-gray-600 mt-1">
+                  Parceiros que trazem apostadores e recebem comissão por isso
+                </p>
               </div>
               <button onClick={() => { setEditingEstablishment(null); setShowEstablishmentForm(true); }} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm sm:text-base">
-                <Plus size={20} /> Novo Estabelecimento
+                <Plus size={20} /> Novo ponto de venda
               </button>
             </div>
+
+            {/* Explicação de uso. A aba dizia só "gerenciar locais que indicam
+                participantes", o que não conta como a coisa FUNCIONA nem por que
+                alguém usaria — e sem isso o recurso fica parado. */}
+            <div className="bg-white rounded-xl border p-6 mb-6">
+              <h3 className="font-semibold mb-2 flex items-center gap-2">
+                <Store size={18} className="text-orange-600" /> Como funciona
+              </h3>
+              <p className="text-sm text-gray-600 leading-relaxed mb-4">
+                Serve para crescer o bolão com a ajuda de terceiros. Você cadastra o bar,
+                a lotérica, a loja ou o amigo que arruma apostadores. Na hora de se
+                cadastrar, o participante escolhe por qual ponto de venda ele veio — e o
+                sistema passa a somar, separadamente, quanto cada um trouxe e quanto
+                tem a receber de comissão.
+              </p>
+              <ol className="text-sm text-gray-600 space-y-2 mb-4 list-decimal list-inside">
+                <li><strong>Cadastre o ponto de venda</strong> com nome, contato e o percentual de comissão dele.</li>
+                <li><strong>Mande o link do bolão</strong> para o parceiro divulgar no balcão ou no grupo dele.</li>
+                <li><strong>O participante escolhe o ponto de venda</strong> na tela de cadastro. Só aparece se houver algum cadastrado aqui.</li>
+                <li><strong>Confira em Financeiro</strong>: dá para filtrar por ponto de venda e ver arrecadação e comissão de cada um.</li>
+                <li><strong>Acerte a comissão</strong> com o parceiro quando fechar a rodada. O pagamento é por fora, direto com ele.</li>
+              </ol>
+              <div className="bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/30 rounded-lg p-3">
+                <p className="text-sm text-orange-800 dark:text-orange-200">
+                  A comissão sai da divisão da rodada, não do seu bolso: por padrão são
+                  {' '}{PADRAO_ESTABELECIMENTO_PCT}% das cartelas <strong>que aquele ponto trouxe</strong>. O percentual
+                  padrão fica em Configurações → Valor de Aposta, e cada ponto de venda pode
+                  ter o seu.
+                </p>
+              </div>
+            </div>
+
             {establishments.length === 0 ? (
               <div className="bg-white rounded-xl p-12 text-center border-2 border-dashed">
                 <Store className="mx-auto text-gray-400 mb-4" size={48} />
-                <h3 className="text-xl font-semibold mb-2">Nenhum estabelecimento cadastrado</h3>
+                <h3 className="text-xl font-semibold mb-2">Nenhum ponto de venda cadastrado</h3>
+                <p className="text-gray-500 text-sm max-w-md mx-auto">
+                  Sem nenhum cadastrado aqui, a escolha de ponto de venda nem aparece no
+                  cadastro do participante — o bolão funciona normalmente sem isso.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -4976,11 +5045,6 @@ const AdminPanel = ({ setView }) => {
                     <input type="text" value={whatsappGroupJid} onChange={e => setWhatsappGroupJid(e.target.value)} placeholder="120363XXXXXXXXX@g.us" className="w-full px-3 py-2 border rounded-lg text-sm font-mono" />
                     <p className="text-xs text-gray-400 mt-1">Para obter o JID: envie uma mensagem ao grupo via EvolutionAPI e veja o campo "remoteJid" na resposta.</p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">URL pública da app</label>
-                    <input type="url" value={appUrl} onChange={e => setAppUrl(e.target.value)} placeholder="https://seu-sistema.vercel.app" className="w-full px-3 py-2 border rounded-lg text-sm" />
-                    <p className="text-xs text-gray-400 mt-1">Usada para gerar o link do ranking no WhatsApp quando o PDF não puder ser enviado. Salve para ativar.</p>
-                  </div>
                 </div>
 
                 <div className="flex justify-end">
@@ -5065,7 +5129,7 @@ const AdminPanel = ({ setView }) => {
                   Simular Finalização
                 </button>
                 <button onClick={() => { setEditingRound(null); setShowRoundForm(true); }} className="flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm sm:text-base">
-                  <Plus size={20} /> Nova Rodada
+                  <Plus size={20} /> Adicionar rodada manual
                 </button>
               </div>
             </div>
