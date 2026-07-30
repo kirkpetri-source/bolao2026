@@ -16,8 +16,8 @@ const STORAGE_KEY = 'bb.tenantId';
 // lista RESERVADOS de api/tenants/create.js, senão um bolão poderia nascer com
 // um nome que sequestra uma rota.
 export const CAMINHOS_RESERVADOS = new Set([
-  '', 'plataforma', 'ranking', 'api', 'assets', 'index.html', 'version.json',
-  'favicon.ico', 'robots.txt',
+  '', 'entrar', 'plataforma', 'ranking', 'api', 'assets', 'index.html',
+  'version.json', 'favicon.ico', 'robots.txt',
 ]);
 
 export function rememberTenant(tid) {

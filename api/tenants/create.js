@@ -6,6 +6,7 @@ import { DEFAULT_TENANT_ID } from '../_shared/tenant.js';
 import { trialSubscription } from '../_shared/subscription.js';
 import { emailKey } from '../_shared/emailIndex.js';
 import { seedRoundsForTenant } from '../_shared/seedRounds.js';
+import { validaSenha } from '../_shared/senha.js';
 
 const EMAIL_DOMAIN = 'bolao.users';
 
@@ -17,7 +18,7 @@ function normWpp(s) {
 // Caminhos do proprio site: um bolao chamado "plataforma" sequestraria a rota
 // do console. A lista precisa acompanhar as rotas em vercel.json.
 const RESERVADOS = new Set([
-  'plataforma', 'ranking', 'api', 'assets', 'admin', 'login', 'cadastro',
+  'plataforma', 'ranking', 'api', 'assets', 'admin', 'login', 'cadastro', 'entrar',
   'app', 'painel', 'conta', 'suporte', 'ajuda', 'sobre', 'termos', 'privacidade',
   'index', 'version', 'favicon', 'robots', 'sitemap', 'bolao', 'boloes',
 ]);
@@ -50,7 +51,10 @@ export default async function handler(req, res) {
     if (!name) return res.status(400).json({ error: 'Informe o nome do organizador' });
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Informe um e-mail válido para os avisos de cobrança' });
     if (whatsapp.length < 10) return res.status(400).json({ error: 'WhatsApp inválido (use DDD + número)' });
-    if (password.length < 6) return res.status(400).json({ error: 'Senha mínimo 6 caracteres' });
+    // Mesma regra do formulário (api/_shared/senha.js). Sem esta linha, quem
+    // chamasse o endpoint direto criaria conta de ORGANIZADOR com "123456".
+    const senhaOk = validaSenha(password, { whatsapp, nome: name });
+    if (!senhaOk.ok) return res.status(400).json({ error: senhaOk.erro });
 
     // Rate limit por IP: no máximo 3 criações a cada 30 minutos.
     const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();

@@ -21,7 +21,7 @@ describe('endereço do bolão no caminho', () => {
   // Um bolão chamado "plataforma" sequestraria o console; "ranking" quebraria
   // a página pública. Por isso a lista de reservados existe dos dois lados.
   it('não confunde rota do site com bolão', () => {
-    for (const r of ['/plataforma', '/api', '/assets', '/version.json', '/favicon.ico']) {
+    for (const r of ['/plataforma', '/entrar', '/api', '/assets', '/version.json', '/favicon.ico']) {
       expect(slugDaUrl(url(r)), r).toBe(null);
     }
   });
@@ -38,7 +38,7 @@ describe('endereço do bolão no caminho', () => {
   });
 
   it('a lista de reservados cobre as rotas do site', () => {
-    for (const r of ['plataforma', 'ranking', 'api', 'assets']) {
+    for (const r of ['plataforma', 'entrar', 'ranking', 'api', 'assets']) {
       expect(CAMINHOS_RESERVADOS.has(r), r).toBe(true);
     }
   });
