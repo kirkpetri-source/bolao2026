@@ -74,6 +74,27 @@ body {
 /* Switches automatically via CSS variables: no Tailwind dark: needed */
 .page-bg {
   background-color: var(--bg-base);
+  /* Mesma família da página de venda: verde de campo, mais vivo no topo e
+     escurecendo para baixo, em vez de cor chapada. `fixed` prende o degradê à
+     janela, senão em tela comprida (painel do organizador) ele se repetia e
+     aparecia uma emenda no meio da rolagem. */
+  background-image:
+    radial-gradient(900px 460px at 50% -8%, rgba(0, 133, 66, 0.10), transparent 62%),
+    radial-gradient(700px 380px at 100% 100%, rgba(0, 133, 66, 0.06), transparent 64%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  min-height: 100vh;
+}
+
+/* No tema escuro o verde pode ser bem mais presente: o texto já é claro e o
+   contraste sobra. É o fundo da página de venda trazido para dentro do sistema. */
+.dark .page-bg {
+  /* A ORDEM importa: a primeira camada fica por cima. O brilho translúcido vem
+     antes; o degradê sólido, que é o fundo, vem por último — invertido, o
+     sólido cobriria o brilho e o efeito sumiria. */
+  background-image:
+    radial-gradient(1000px 520px at 50% -6%, rgba(16, 185, 87, 0.16), transparent 64%),
+    linear-gradient(180deg, #062a17 0%, #04170d 46%, #04170d 100%);
 }
 
 /* ─── Scrollbar ─────────────────────────────────── */

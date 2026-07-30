@@ -844,7 +844,15 @@ function chegouParaCadastrar() {
   // Sem sessão, o endereço do bolão manda para a tela única de entrada,
   // levando o bolão junto — assim o link que o organizador já distribuiu
   // continua valendo e o cadastro nasce no bolão certo.
-  if (!currentUser || view === 'login') {
+  //
+  // A condição olha SÓ a ausência de sessão. Incluir `view === 'login'` aqui
+  // criava um laço infinito: `view` nasce 'login' e só vira 'user'/'admin' num
+  // efeito, que roda DEPOIS do primeiro render. Então, logo após entrar, o
+  // primeiro render ainda tinha view='login', o redirect disparava, a página
+  // recarregava, a sessão voltava, view era 'login' de novo — e assim sem fim.
+  // Com a tela de login antiga isso não aparecia porque ela apenas renderizava;
+  // agora que este ramo NAVEGA, a repetição virou loop visível.
+  if (!currentUser) {
     const destino = `/entrar?bolao=${encodeURIComponent(tenantId || '')}`
       + (chegouParaCadastrar() ? '&cadastro=1' : '');
     window.location.replace(destino);
@@ -862,7 +870,11 @@ function chegouParaCadastrar() {
   }
   if (currentUser.isAdmin && view === 'admin') return <AdminPanel setView={setView} />;
   if (view === 'user') return <UserPanel setView={setView} />;
-  return null;
+
+  // Primeiro render depois de entrar: `view` ainda é 'login' porque o efeito
+  // que o ajusta roda em seguida. Mostra o painel do papel da pessoa em vez de
+  // devolver null, que piscava uma tela em branco no meio do login.
+  return currentUser.isAdmin ? <AdminPanel setView={setView} /> : <UserPanel setView={setView} />;
 }
 
 export default function Root() {
