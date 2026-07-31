@@ -35,6 +35,7 @@ export default async function handler(req, res) {
       return {
         id: d.id,
         nome: t.name || d.id,
+        demo: t.demo === true,
         email: t.ownerEmail || '',
         whatsapp: t.ownerWhatsapp || '',
         status,
@@ -49,7 +50,9 @@ export default async function handler(req, res) {
 
     // MRR conta só quem está pagando de fato: bolão em teste ainda não é receita,
     // e contá-lo inflaria o número justamente no começo, quando ele engana mais.
-    const pagantes = boloes.filter(b => b.status === STATUS.ACTIVE);
+    // Bolão de demonstração também fica de fora: ele nasce "ativo" para as telas
+    // ficarem cheias nos prints, e entraria no MRR como receita que ninguém pagou.
+    const pagantes = boloes.filter(b => b.status === STATUS.ACTIVE && !b.demo);
     const mrrCentavos = pagantes.reduce((s, b) => s + b.precoCentavos, 0);
 
     const resumo = {
