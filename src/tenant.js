@@ -45,7 +45,11 @@ export function tenantPedidoNaUrl() {
   const doCaminho = slugDaUrl();
   if (doCaminho) return doCaminho;
   try {
-    const t = new URL(window.location.href).searchParams.get('t');
+    const q = new URL(window.location.href).searchParams;
+    // `?bolao=` é o convite (/entrar?bolao=X) — sem ler isto, quem recebe o
+    // link de um bolão, já tem conta e faz login cai no bolão ANTERIOR dele, e
+    // não no do convite. `?t=` é o formato antigo, mantido por compatibilidade.
+    const t = q.get('bolao') || q.get('t');
     return t ? String(t).toLowerCase() : null;
   } catch { return null; }
 }

@@ -800,13 +800,17 @@ function chegouParaCadastrar() {
 
   if (!currentUser && view === 'onboard') return <OnboardingScreen setView={setView} />;
 
-  // Sem bolão na URL: a raiz não cadastra ninguém em bolão nenhum. Ela vende o
-  // sistema para quem quer ORGANIZAR — é quem paga a mensalidade. Quem chegou
-  // para palpitar segue em /entrar, que é a portaria de sempre.
-  if (!tenantId && !currentUser) {
-    return ehRotaDeEntrada()
-      ? <Entrada setView={setView} />
-      : <Landing setView={setView} />;
+  // Sem sessão: /entrar SEMPRE mostra a tela de entrada, e a raiz vende o
+  // sistema para quem quer ORGANIZAR — é quem paga a mensalidade.
+  //
+  // O teste de /entrar vem ANTES de qualquer coisa que dependa do bolão. Com o
+  // convite (/entrar?bolao=X) passando a resolver o bolão, uma condição do tipo
+  // `!tenantId && !currentUser` deixaria de valer nessa tela, a execução cairia
+  // no ramo de redirecionamento logo abaixo e a pessoa seria mandada para
+  // /entrar de novo — laço.
+  if (!currentUser) {
+    if (ehRotaDeEntrada()) return <Entrada setView={setView} />;
+    if (!tenantId) return <Landing setView={setView} />;
   }
 
   // Logado e ainda sem bolão resolvido: o observador de autenticação está
