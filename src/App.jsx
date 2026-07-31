@@ -160,10 +160,18 @@ const AppProvider = ({ children }) => {
   // tela vazia que parece defeito do sistema.
   const [bolaoInexistente, setBolaoInexistente] = useState(false);
 
-  // O endereço sempre mostra o bolão aberto — inclusive quando ele veio do
-  // histórico do navegador ou do cadastro do usuário, e não da URL.
-  useEffect(() => { sincronizarUrlComTenant(tenantId); }, [tenantId]);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // O endereço mostra o bolão aberto — mas SÓ com sessão.
+  //
+  // Sem esta condição o sistema entrava em laço: em /entrar?bolao=X o bolão já
+  // é resolvido (para o convite levar ao bolão certo), o efeito reescrevia a
+  // barra para /X, o App deixava de reconhecer a rota de entrada, mandava de
+  // volta para /entrar?bolao=X, e tudo recomeçava. Na tela de entrada o
+  // endereço tem de continuar sendo /entrar.
+  useEffect(() => {
+    if (currentUser) sincronizarUrlComTenant(tenantId);
+  }, [tenantId, currentUser]);
   const [users, setUsers] = useState([]);            // usuários globais (identidade)
   const [tenantMembers, setTenantMembers] = useState([]); // membros do tenant atual
   const [teams, setTeams] = useState([]);

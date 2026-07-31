@@ -56,3 +56,20 @@ describe('a tela de entrada não pode depender de haver bolão', () => {
     expect(APP).not.toMatch(/if \(!tenantId && !currentUser\) \{\s*\n\s*return ehRotaDeEntrada/);
   });
 });
+
+// O laço de 31/07: em /entrar?bolao=X o bolão já é resolvido, e o efeito que
+// sincroniza a barra de endereço reescrevia a URL para /X. O App então deixava
+// de reconhecer a rota de entrada, redirecionava para /entrar?bolao=X, e
+// recomeçava. Na tela de entrada o endereço tem de continuar sendo /entrar.
+describe('a barra de endereço só é reescrita com sessão', () => {
+  const APP = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'App.jsx'), 'utf8');
+
+  it('a chamada é condicionada ao usuário logado', () => {
+    expect(APP).toMatch(/if \(currentUser\) sincronizarUrlComTenant\(tenantId\)/);
+  });
+
+  it('não existe chamada solta, fora da condição', () => {
+    const solta = /useEffect\(\(\) => \{ sincronizarUrlComTenant\(tenantId\); \}/;
+    expect(APP).not.toMatch(solta);
+  });
+});
