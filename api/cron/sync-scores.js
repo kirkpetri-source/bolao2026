@@ -254,8 +254,16 @@ export default async function handler(req, res) {
           // do sistema: com placar, sem status de "em andamento" e passado o
           // tempo máximo de uma partida, o jogo acabou.
           const finishedDaFonte = source.finished ?? match.finished;
-          const finished = finishedDaFonte
-            || isMatchSettled({ ...match, homeScore, awayScore, matchStatus: source.matchStatus ?? match.matchStatus ?? null });
+          // Jogo ADIADO não é jogo encerrado. isMatchSettled devolve true para
+          // ele de propósito (serve para a rodada parar de esperá-lo), mas usar
+          // isso para gravar `finished` marcaria como "encerrado" um jogo que
+          // nunca aconteceu — e a tela passaria a dizer "Final:" num placar
+          // vazio. A pontuação já ignora adiado; aqui é a honestidade do dado.
+          const adiado = isMatchPostponed({ ...match, apiStatus: source.matchStatus ?? match.apiStatus });
+          const finished = adiado
+            ? false
+            : (finishedDaFonte
+              || isMatchSettled({ ...match, homeScore, awayScore, matchStatus: source.matchStatus ?? match.matchStatus ?? null }));
           // Propaga matchStatus para que bolao-engine possa detectar jogos ainda em andamento
           // (ex: 'ET' = prorrogação, 'P' = pênaltis, 'BT' = intervalo prorrogação)
           const matchStatus = source.matchStatus ?? match.matchStatus ?? null;

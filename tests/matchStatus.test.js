@@ -102,3 +102,17 @@ describe('resumo da rodada', () => {
     expect(resumoDaRodada()).toMatchObject({ total: 0, adiados: 0, valendo: 0 });
   });
 });
+
+// Regressão vista na varredura de 31/07: os quatro jogos adiados da rodada 21
+// ficaram gravados com finished=true, porque a cura do campo usava
+// isMatchSettled — que trata adiado como "resolvido" para a rodada não ficar
+// esperando por ele. Resolvido e encerrado são coisas diferentes.
+describe('adiado não é encerrado', () => {
+  it('isMatchSettled aceita adiado (a rodada pode seguir)', () => {
+    expect(isMatchSettled({ apiStatus: 'PST' })).toBe(true);
+  });
+
+  it('mas adiado não pontua nem com placar gravado por engano', () => {
+    expect(matchCountsForScoring({ apiStatus: 'PST', homeScore: 1, awayScore: 0 })).toBe(false);
+  });
+});
